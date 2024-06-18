@@ -35,21 +35,24 @@ jobs:
             ~/.cache/mops
             ~/mops
 
-      - uses: aviate-labs/setup-dfx@v0.2.3
-        with:
-          dfx-version: 0.15.0
+      - name: Install dfx
+        uses: dfinity/setup-dfx@main
+      - name: Confirm successful installation
+        run: dfx --version
+    
+      - name: Install dfx cache
+        run: dfx cache install
 
       - name: Install mops & mocv
         run: |
-            npm -g i mocv
-            npm --yes -g i ic-mops
-            mops i
+          npm --yes -g i ic-mops
+          mops i
+          mops toolchain init
+          mops toolchain use moc 0.10.4
 
-      - name: install wasmtime
-        run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-
+          # set moc path for dfx to use
+          echo "DFX_MOC_PATH=$(mops toolchain bin moc)" >> $GITHUB_ENV
+    
       - name: Detect warnings
         run: make check
 

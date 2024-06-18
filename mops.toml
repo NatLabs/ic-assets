@@ -1,3 +1,11 @@
+[package]
+name = "ic-assets"
+description = "A library implementation of the IC Assets Canister with v2 certification"
+version = "0.0.1"
+repository = "https://github.com/NatLabs/ic-assets"
+license = "MIT"
+keywords = ["certified", "http", "request", "streaming"]
+
 [dependencies]
 base = "0.11.1"
 http-types = "1.0.1"
