@@ -1,7 +1,7 @@
 {
   "version": 1,
   "canisters": {
-    "asset_canister": {
+    "assets_canister": {
       "type": "motoko",
       "main": "src/Canister.mo",
       "init_arg": "(null)"
@@ -12,7 +12,7 @@
     },
     "asset-test2": {
       "type": "motoko",
-      "main": "tests/Asset.ActorTest.mo"
+      "main": "tests/Assets.ActorTest.mo"
     }
   },
   "defaults": {

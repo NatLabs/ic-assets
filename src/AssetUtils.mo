@@ -39,7 +39,7 @@ module {
     type Time = Time.Time;
     type Vector<A> = Vector.Vector<A>;
     type Order = Order.Order;
-    type Asset = T.Asset;
+    type Assets = T.Assets;
     type AssetEncoding = T.AssetEncoding;
     type Batch = T.Batch;
     type Key = T.Key;
@@ -142,7 +142,7 @@ module {
     //     content_type : Text;
     //     content_encoding : Text;
 
-    func new_asset() : T.Asset {
+    func new_asset() : T.Assets {
         {
             encodings = Map.new();
             headers = Map.new();
@@ -163,7 +163,7 @@ module {
         };
     };
 
-    public func certify_encoding(self : StableStore, asset_key : Text, asset : Asset, encoding_name : Text) : Result<(), Text> {
+    public func certify_encoding(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text) : Result<(), Text> {
 
         let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err("Encoding not found.");
 
@@ -186,7 +186,7 @@ module {
         #ok();
     };
 
-    public func remove_encoding_certificate(self : StableStore, asset_key : Text, asset : Asset, encoding_name : Text) : Result<(), Text> {
+    public func remove_encoding_certificate(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text) : Result<(), Text> {
 
         let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err("Encoding not found.");
 
@@ -210,7 +210,7 @@ module {
         #ok();
     };
 
-    func certify_asset(self : StableStore, key : Text, asset : Asset) {
+    func certify_asset(self : StableStore, key : Text, asset : Assets) {
         // delete all previous certifications associated with the asset's key
         for ((encoding_name, encoding) in Map.entries(asset.encodings)) {
             ignore remove_encoding_certificate(self, key, asset, encoding_name);
@@ -295,12 +295,12 @@ module {
 
     public func retrieve(self : StableStore, key : T.Key) : Result<Blob, Text> {
         let formatted_key = format_key(key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         let ?id_encoding = Map.get(asset.encodings, thash, "identity") else return #err("No Identity encoding.");
 
         if (Vector.size(id_encoding.content_chunks) > 1) {
-            return #err("Asset too large. Use get() and get_chunk() instead.");
+            return #err("Assets too large. Use get() and get_chunk() instead.");
         };
 
         #ok(Vector.get(id_encoding.content_chunks, 0));
@@ -329,7 +329,7 @@ module {
             case (?asset) {};
         };
 
-        let ?asset = opt_asset else return #err("Asset not found.");
+        let ?asset = opt_asset else return #err("Assets not found.");
 
         label for_loop for (encoding in args.accept_encodings.vals()) {
             let encoded_asset = switch (Map.get(asset.encodings, thash, encoding)) {
@@ -381,7 +381,7 @@ module {
 
     public func get_chunk(self : StableStore, args : T.GetChunkArgs) : Result<T.ChunkContent, Text> {
         let formatted_key = format_key(args.key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
         let ?encoding = Map.get(asset.encodings, thash, args.content_encoding) else return #err("Encoding not found.");
 
         switch (args.sha256) {
@@ -400,7 +400,7 @@ module {
 
     public func create_asset(self : StableStore, args : T.CreateAssetArguments) : Result<(), Text> {
         let formatted_key = format_key(args.key);
-        if (Map.has(self.assets, thash, formatted_key)) return #err("Asset already exists.");
+        if (Map.has(self.assets, thash, formatted_key)) return #err("Assets already exists.");
 
         let asset = new_asset();
 
@@ -425,7 +425,7 @@ module {
 
     public func set_asset_content(self : StableStore, args : T.SetAssetContentArguments) : Result<(), Text> {
         let formatted_key = format_key(args.key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         let content_chunks = Vector.new<Blob>();
 
@@ -467,7 +467,7 @@ module {
 
     public func unset_asset_content(self : StableStore, args : T.UnsetAssetContentArguments) : Result<(), Text> {
         let formatted_key = format_key(args.key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         let ?encoding = Map.remove(asset.encodings, thash, args.content_encoding) else return #err("Encoding not found.");
 
@@ -478,7 +478,7 @@ module {
 
     public func delete_asset(self : StableStore, args : T.DeleteAssetArguments) : Result<(), Text> {
         let formatted_key = format_key(args.key);
-        let ?asset = Map.remove(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.remove(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         for (encoding in Map.keys(asset.encodings)) {
             ignore remove_encoding_certificate(self, formatted_key, asset, encoding); // should automatically recertify fallback paths, if any is affected
@@ -498,7 +498,7 @@ module {
 
     public func get_asset_properties(self : StableStore, key : T.Key) : Result<T.AssetProperties, Text> {
         let formatted_key = format_key(key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         let encodings = Vector.new<T.AssetProperties>();
 
@@ -512,7 +512,7 @@ module {
 
     public func set_asset_properties(self : StableStore, args : T.SetAssetPropertiesArguments) : Result<(), Text> {
         let formatted_key = format_key(args.key);
-        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         switch (args.is_aliased) {
             case (?is_aliased) asset.is_aliased := is_aliased;
@@ -865,7 +865,7 @@ module {
         );
     };
 
-    func build_headers(asset : Asset, encoding_name : Text) : Map<Text, Text> {
+    func build_headers(asset : Assets, encoding_name : Text) : Map<Text, Text> {
         let headers = Map.new<Text, Text>();
         ignore Map.put(headers, thash, "content-type", asset.content_type);
 
@@ -890,7 +890,7 @@ module {
     public func http_request_streaming_callback(self : StableStore, token_blob : T.StreamingToken) : Result<T.StreamingCallbackResponse, Text> {
         let ?token : ?T.CustomStreamingToken = from_candid (token_blob) else return #err("Could not decode streaming token");
 
-        let ?asset = Map.get(self.assets, thash, token.key) else return #err("Asset not found.");
+        let ?asset = Map.get(self.assets, thash, token.key) else return #err("Assets not found.");
         let ?encoding = Map.get(asset.encodings, thash, token.content_encoding) else return #err("Encoding not found.");
 
         if (?encoding.sha256 != token.sha256) return #err("SHA256 hash mismatch");
@@ -917,7 +917,7 @@ module {
     func build_ok_response(
         self : StableStore,
         key : T.Key,
-        asset : Asset,
+        asset : Assets,
         encoding_name : Text,
         encoding : AssetEncoding,
         chunk_index : Nat,
@@ -971,7 +971,7 @@ module {
         };
 
         // Debug.print(debug_show { http_req; http_res = { http_res with streaming_strategy = null } });
-        let certified_assets_response = CertifiedAssets.get_certified_response(self.certificate_store, http_req, http_res);
+        let certified_assets_response = CertifiedAssets.get_certified_response(self.certificate_store, http_req, http_res, ?encoding.sha256);
 
         let certified_response = switch (certified_assets_response) {
             case (#ok(certified_response)) certified_response;

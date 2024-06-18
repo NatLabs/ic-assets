@@ -2,63 +2,63 @@ import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Timer "mo:base/Timer";
 
-import Asset "";
+import Assets "";
 
-shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.CanisterArgs) = this_canister {
+shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.CanisterArgs) = this_canister {
 
-    public type Key = Asset.Key;
-    public type Path = Asset.Path;
-    public type BatchId = Asset.BatchId;
-    public type ChunkId = Asset.ChunkId;
+    public type Key = Assets.Key;
+    public type Path = Assets.Path;
+    public type BatchId = Assets.BatchId;
+    public type ChunkId = Assets.ChunkId;
     public type Time = Int;
 
-    public type CreateAssetArguments = Asset.CreateAssetArguments;
-    public type SetAssetContentArguments = Asset.SetAssetContentArguments;
-    public type UnsetAssetContentArguments = Asset.UnsetAssetContentArguments;
-    public type DeleteAssetArguments = Asset.DeleteAssetArguments;
-    public type ClearArguments = Asset.ClearArguments;
+    public type CreateAssetArguments = Assets.CreateAssetArguments;
+    public type SetAssetContentArguments = Assets.SetAssetContentArguments;
+    public type UnsetAssetContentArguments = Assets.UnsetAssetContentArguments;
+    public type DeleteAssetArguments = Assets.DeleteAssetArguments;
+    public type ClearArguments = Assets.ClearArguments;
 
-    public type SetAssetPropertiesArguments = Asset.SetAssetPropertiesArguments;
-    public type BatchOperationKind = Asset.BatchOperationKind;
-    public type AssetDetails = Asset.AssetDetails;
-    public type AssetEncodingDetails = Asset.AssetEncodingDetails;
-    public type CommitBatchArguments = Asset.CommitBatchArguments;
-    public type CommitProposedBatchArguments = Asset.CommitProposedBatchArguments;
-    public type ComputeEvidenceArguments = Asset.ComputeEvidenceArguments;
-    public type DeleteBatchArguments = Asset.DeleteBatchArguments;
-    public type StreamingCallbackToken = Asset.StreamingCallbackToken;
-    public type ConfigurationResponse = Asset.ConfigurationResponse;
-    public type ConfigureArguments = Asset.ConfigureArguments;
-    public type Permission = Asset.Permission;
-    public type GrantPermission = Asset.GrantPermission;
-    public type RevokePermission = Asset.RevokePermission;
-    public type ListPermitted = Asset.ListPermitted;
-    public type InitArgs = Asset.InitArgs;
-    public type UpgradeArgs = Asset.UpgradeArgs;
-    public type SetPermissions = Asset.SetPermissions;
-    public type GetArgs = Asset.GetArgs;
-    public type EncodedAsset = Asset.EncodedAsset;
+    public type SetAssetPropertiesArguments = Assets.SetAssetPropertiesArguments;
+    public type BatchOperationKind = Assets.BatchOperationKind;
+    public type AssetDetails = Assets.AssetDetails;
+    public type AssetEncodingDetails = Assets.AssetEncodingDetails;
+    public type CommitBatchArguments = Assets.CommitBatchArguments;
+    public type CommitProposedBatchArguments = Assets.CommitProposedBatchArguments;
+    public type ComputeEvidenceArguments = Assets.ComputeEvidenceArguments;
+    public type DeleteBatchArguments = Assets.DeleteBatchArguments;
+    public type StreamingCallbackToken = Assets.StreamingCallbackToken;
+    public type ConfigurationResponse = Assets.ConfigurationResponse;
+    public type ConfigureArguments = Assets.ConfigureArguments;
+    public type Permission = Assets.Permission;
+    public type GrantPermission = Assets.GrantPermission;
+    public type RevokePermission = Assets.RevokePermission;
+    public type ListPermitted = Assets.ListPermitted;
+    public type InitArgs = Assets.InitArgs;
+    public type UpgradeArgs = Assets.UpgradeArgs;
+    public type SetPermissions = Assets.SetPermissions;
+    public type GetArgs = Assets.GetArgs;
+    public type EncodedAsset = Assets.EncodedAsset;
     public type GetChunkArgs = StreamingCallbackToken;
-    public type ChunkContent = Asset.ChunkContent;
-    public type Chunk = Asset.Chunk;
-    public type ListArgs = Asset.ListArgs;
-    public type CertifiedTree = Asset.CertifiedTree;
-    public type AssetProperties = Asset.AssetProperties;
-    public type StoreArgs = Asset.StoreArgs;
-    public type ValidationResult = Asset.ValidationResult;
-    public type CreateBatchResponse = Asset.CreateBatchResponse;
-    public type CreateChunkArguments = Asset.CreateChunkArguments;
-    public type CreateChunkResponse = Asset.CreateChunkResponse;
-    public type CreateBatchArguments = Asset.CreateBatchArguments;
-    public type StreamingCallback = Asset.StreamingCallback;
-    public type StreamingCallbackResponse = Asset.StreamingCallbackResponse;
-    public type StreamingToken = Asset.StreamingToken;
-    public type CustomStreamingToken = Asset.CustomStreamingToken;
-    public type HttpRequest = Asset.HttpRequest;
-    public type HttpResponse = Asset.HttpResponse;
-    public type Service = Asset.Service;
-    public type CanisterArgs = Asset.CanisterArgs;
-    public type CanisterInterface = Asset.CanisterInterface;
+    public type ChunkContent = Assets.ChunkContent;
+    public type Chunk = Assets.Chunk;
+    public type ListArgs = Assets.ListArgs;
+    public type CertifiedTree = Assets.CertifiedTree;
+    public type AssetProperties = Assets.AssetProperties;
+    public type StoreArgs = Assets.StoreArgs;
+    public type ValidationResult = Assets.ValidationResult;
+    public type CreateBatchResponse = Assets.CreateBatchResponse;
+    public type CreateChunkArguments = Assets.CreateChunkArguments;
+    public type CreateChunkResponse = Assets.CreateChunkResponse;
+    public type CreateBatchArguments = Assets.CreateBatchArguments;
+    public type StreamingCallback = Assets.StreamingCallback;
+    public type StreamingCallbackResponse = Assets.StreamingCallbackResponse;
+    public type StreamingToken = Assets.StreamingToken;
+    public type CustomStreamingToken = Assets.CustomStreamingToken;
+    public type HttpRequest = Assets.HttpRequest;
+    public type HttpResponse = Assets.HttpResponse;
+    public type Service = Assets.Service;
+    public type CanisterArgs = Assets.CanisterArgs;
+    public type CanisterInterface = Assets.CanisterInterface;
 
     type Result<A, B> = Result.Result<A, B>;
 
@@ -66,16 +66,16 @@ shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.Cani
         Principal.fromActor(this_canister);
     };
 
-    stable var assets_sstore = Asset.init_stable_store(owner);
-    assets_sstore := Asset.migrate(assets_sstore);
+    stable var assets_sstore = Assets.init_stable_store(owner);
+    assets_sstore := Assets.migrate(assets_sstore);
 
-    let assets = Asset.Asset(assets_sstore);
+    let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Asset.StreamingToken) : async ?(Asset.StreamingCallbackResponse) {
+    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
         ?assets.http_request_streaming_callback(token_blob);
     };
 
-    public query func http_request(request : Asset.HttpRequest) : async Asset.HttpResponse {
+    public query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
         assets.http_request(request);
     };
 
@@ -95,89 +95,89 @@ shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.Cani
         assets.api_version();
     };
 
-    public shared query ({ caller }) func retrieve(key : Asset.Key) : async (Blob) {
+    public shared query ({ caller }) func retrieve(key : Assets.Key) : async (Blob) {
         assets.retrieve(caller, key);
     };
 
-    public shared query ({ caller }) func get(args : Asset.GetArgs) : async Asset.EncodedAsset {
+    public shared query ({ caller }) func get(args : Assets.GetArgs) : async Assets.EncodedAsset {
         assets.get(args);
     };
 
-    public shared query ({ caller }) func get_chunk(args : Asset.GetChunkArgs) : async (Asset.ChunkContent) {
+    public shared query ({ caller }) func get_chunk(args : Assets.GetChunkArgs) : async (Assets.ChunkContent) {
         assets.get_chunk(args);
     };
 
-    public shared ({ caller }) func grant_permission(args : Asset.GrantPermission) : async () {
+    public shared ({ caller }) func grant_permission(args : Assets.GrantPermission) : async () {
         await* assets.grant_permission(caller, args);
     };
 
-    public shared ({ caller }) func revoke_permission(args : Asset.RevokePermission) : async () {
+    public shared ({ caller }) func revoke_permission(args : Assets.RevokePermission) : async () {
         await* assets.revoke_permission(caller, args);
     };
 
-    public shared query ({ caller }) func list(args : {}) : async [Asset.AssetDetails] {
+    public shared query ({ caller }) func list(args : {}) : async [Assets.AssetDetails] {
         assets.list(
             args
         );
     };
 
-    public shared ({ caller }) func store(args : Asset.StoreArgs) : async () {
+    public shared ({ caller }) func store(args : Assets.StoreArgs) : async () {
         assets.store(caller, args);
     };
 
-    public shared ({ caller }) func create_asset(args : Asset.CreateAssetArguments) : async () {
+    public shared ({ caller }) func create_asset(args : Assets.CreateAssetArguments) : async () {
         assets.create_asset(caller, args);
     };
 
-    public shared ({ caller }) func set_asset_content(args : Asset.SetAssetContentArguments) : async () {
+    public shared ({ caller }) func set_asset_content(args : Assets.SetAssetContentArguments) : async () {
         assets.set_asset_content(caller, args);
     };
 
-    public shared ({ caller }) func unset_asset_content(args : Asset.UnsetAssetContentArguments) : async () {
+    public shared ({ caller }) func unset_asset_content(args : Assets.UnsetAssetContentArguments) : async () {
         assets.unset_asset_content(caller, args);
     };
 
-    public shared ({ caller }) func delete_asset(args : Asset.DeleteAssetArguments) : async () {
+    public shared ({ caller }) func delete_asset(args : Assets.DeleteAssetArguments) : async () {
         assets.delete_asset(caller, args);
     };
 
-    public shared query ({ caller }) func get_asset_properties(key : Asset.Key) : async (Asset.AssetProperties) {
+    public shared query ({ caller }) func get_asset_properties(key : Assets.Key) : async (Assets.AssetProperties) {
         assets.get_asset_properties(caller, key);
     };
 
-    public shared ({ caller }) func set_asset_properties(args : Asset.SetAssetPropertiesArguments) : async () {
+    public shared ({ caller }) func set_asset_properties(args : Assets.SetAssetPropertiesArguments) : async () {
         assets.set_asset_properties(caller, args);
     };
 
-    public shared ({ caller }) func clear(args : Asset.ClearArguments) : async () {
+    public shared ({ caller }) func clear(args : Assets.ClearArguments) : async () {
         assets.clear(caller, args);
     };
 
-    public shared ({ caller }) func create_batch(args : {}) : async (Asset.CreateBatchResponse) {
+    public shared ({ caller }) func create_batch(args : {}) : async (Assets.CreateBatchResponse) {
         assets.create_batch(caller, args);
     };
 
-    public shared ({ caller }) func create_chunk(args : Asset.CreateChunkArguments) : async (Asset.CreateChunkResponse) {
+    public shared ({ caller }) func create_chunk(args : Assets.CreateChunkArguments) : async (Assets.CreateChunkResponse) {
         assets.create_chunk(caller, args);
     };
 
-    public shared ({ caller }) func commit_batch(args : Asset.CommitBatchArguments) : async () {
+    public shared ({ caller }) func commit_batch(args : Assets.CommitBatchArguments) : async () {
         await* assets.commit_batch(caller, args);
     };
 
-    public shared ({ caller }) func propose_commit_batch(args : Asset.CommitBatchArguments) : async () {
+    public shared ({ caller }) func propose_commit_batch(args : Assets.CommitBatchArguments) : async () {
         assets.propose_commit_batch(caller, args);
     };
 
-    public shared ({ caller }) func commit_proposed_batch(args : Asset.CommitProposedBatchArguments) : async () {
+    public shared ({ caller }) func commit_proposed_batch(args : Assets.CommitProposedBatchArguments) : async () {
         await* assets.commit_proposed_batch(caller, args);
     };
 
-    public shared ({ caller }) func compute_evidence(args : Asset.ComputeEvidenceArguments) : async (?Blob) {
+    public shared ({ caller }) func compute_evidence(args : Assets.ComputeEvidenceArguments) : async (?Blob) {
         assets.compute_evidence(caller, args);
     };
 
-    public shared ({ caller }) func delete_batch(args : Asset.DeleteBatchArguments) : async () {
+    public shared ({ caller }) func delete_batch(args : Assets.DeleteBatchArguments) : async () {
         assets.delete_batch(caller, args);
     };
 
@@ -193,7 +193,7 @@ shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.Cani
         assets.list_authorized();
     };
 
-    public shared ({ caller }) func list_permitted(args : Asset.ListPermitted) : async ([Principal]) {
+    public shared ({ caller }) func list_permitted(args : Assets.ListPermitted) : async ([Principal]) {
         assets.list_permitted(args);
     };
 
@@ -201,23 +201,23 @@ shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.Cani
         await* assets.take_ownership(caller);
     };
 
-    public shared ({ caller }) func get_configuration() : async (Asset.ConfigurationResponse) {
+    public shared ({ caller }) func get_configuration() : async (Assets.ConfigurationResponse) {
         assets.get_configuration(caller);
     };
 
-    public shared ({ caller }) func configure(args : Asset.ConfigureArguments) : async () {
+    public shared ({ caller }) func configure(args : Assets.ConfigureArguments) : async () {
         assets.configure(caller, args);
     };
 
-    public shared ({ caller }) func certified_tree({}) : async (Asset.CertifiedTree) {
+    public shared ({ caller }) func certified_tree({}) : async (Assets.CertifiedTree) {
         assets.certified_tree();
     };
 
-    public shared ({ caller }) func validate_grant_permission(args : Asset.GrantPermission) : async (Result<Text, Text>) {
+    public shared ({ caller }) func validate_grant_permission(args : Assets.GrantPermission) : async (Result<Text, Text>) {
         assets.validate_grant_permission(args);
     };
 
-    public shared ({ caller }) func validate_revoke_permission(args : Asset.RevokePermission) : async (Result<Text, Text>) {
+    public shared ({ caller }) func validate_revoke_permission(args : Assets.RevokePermission) : async (Result<Text, Text>) {
         assets.validate_revoke_permission(args);
     };
 
@@ -225,11 +225,11 @@ shared ({ caller = owner }) actor class AssetCanister(canister_args : Asset.Cani
         assets.validate_take_ownership();
     };
 
-    public shared ({ caller }) func validate_commit_proposed_batch(args : Asset.CommitProposedBatchArguments) : async (Result<Text, Text>) {
+    public shared ({ caller }) func validate_commit_proposed_batch(args : Assets.CommitProposedBatchArguments) : async (Result<Text, Text>) {
         assets.validate_commit_proposed_batch(args);
     };
 
-    public shared ({ caller }) func validate_configure(args : Asset.ConfigureArguments) : async (Result<Text, Text>) {
+    public shared ({ caller }) func validate_configure(args : Assets.ConfigureArguments) : async (Result<Text, Text>) {
         assets.validate_configure(args);
     };
 

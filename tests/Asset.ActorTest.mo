@@ -11,12 +11,12 @@ import { test; suite } "mo:test/async";
 import Itertools "mo:itertools/Iter";
 
 import BaseAsset "../src/BaseAsset";
-import Asset "../src";
+import Assets "../src";
 import Migrations "../src/Migrations";
 
-import AssetCanister "../src/Canister";
+import AssetsCanister "../src/Canister";
 
-actor {
+actor class() = this_canister{
 
     type Buffer<A> = Buffer.Buffer<A>;
     type Map<K, V> = Map.Map<K, V>;
@@ -26,9 +26,9 @@ actor {
     let caller = Principal.fromText("tde7l-3qaaa-aaaah-qansa-cai");
     let preparer = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 
-    // let test_data = Map.new<Text, Map<Asset.Key, Asset.AssetDetails>>();
+    // let test_data = Map.new<Text, Map<Assets.Key, Assets.AssetDetails>>();
 
-    // let test1 = Map.new<Asset.Key, Asset.SharedAsset>();
+    // let test1 = Map.new<Assets.Key, Assets.SharedAsset>();
     // Map.put(test1, "/hello", {
     //     key = "/hello";
     //     encodings: [{
@@ -42,9 +42,9 @@ actor {
     //     allow_raw_access = null;
     // });
 
-    // Map.put(test_data, "test1", Map.new<Asset.Key, Asset.AssetDetails>());
+    // Map.put(test_data, "test1", Map.new<Assets.Key, Assets.AssetDetails>());
 
-    func permissions(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func permissions(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
 
         assert (await asset.list_permitted({ permission = #Prepare })) == [];
         assert (await asset.list_permitted({ permission = #Commit })) == [owner];
@@ -108,9 +108,9 @@ actor {
         is_aliased = ?true;
     };
 
-    func store_and_get_asset(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func store_and_get_asset(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
 
-        let permission_request : Asset.GrantPermission = {
+        let permission_request : Assets.GrantPermission = {
             permission = #ManagePermissions;
             to_principal = caller;
         };
@@ -119,7 +119,7 @@ actor {
 
         await asset.store(hello_world_gzip);
 
-        let get_args : Asset.GetArgs = {
+        let get_args : Assets.GetArgs = {
             key = "/hello";
             accept_encodings = ["gzip"];
         };
@@ -140,8 +140,8 @@ actor {
 
     };
 
-    func get_asset_from_aliases(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
-        let alias1 : Asset.GetArgs = {
+    func get_asset_from_aliases(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
+        let alias1 : Assets.GetArgs = {
             key = "/hello.html";
             accept_encodings = ["gzip"];
         };
@@ -160,7 +160,7 @@ actor {
         assert result1_properties.allow_raw_access == null;
         assert result1_properties.is_aliased == ?true;
 
-        let alias2 : Asset.GetArgs = {
+        let alias2 : Assets.GetArgs = {
             key = "/hello/index.html";
             accept_encodings = ["gzip"];
         };
@@ -181,11 +181,11 @@ actor {
 
     };
 
-    func delete_hello_world_asset(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func delete_hello_world_asset(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
 
         await asset.delete_asset({ key = "/hello" });
 
-        let get_args2 : Asset.GetArgs = {
+        let get_args2 : Assets.GetArgs = {
             key = "/hello";
             accept_encodings = ["gzip"];
         };
@@ -195,7 +195,7 @@ actor {
 
     };
 
-    func configure(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func configure(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
         var config = await asset.get_configuration();
 
         assert config.max_batches == null;
@@ -218,14 +218,14 @@ actor {
 
     let hello_world_identity_chunks : [Blob] = ["H", "e", "l", "l", "o", ",", " ", "W", "o", "r", "l", "d", "!"];
 
-    func upload_chunks(asset : AssetCanister.AssetCanister, batch_id : Asset.BatchId, chunks : [Blob]) : async* [Asset.ChunkId] {
-        let async_chunks = Buffer.Buffer<async Asset.CreateChunkResponse>(8);
+    func upload_chunks(asset : AssetsCanister.AssetsCanister, batch_id : Assets.BatchId, chunks : [Blob]) : async* [Assets.ChunkId] {
+        let async_chunks = Buffer.Buffer<async Assets.CreateChunkResponse>(8);
 
         for (chunk in chunks.vals()) {
             async_chunks.add(asset.create_chunk({ batch_id = batch_id; content = chunk }));
         };
 
-        let chunk_ids = Buffer.Buffer<Asset.ChunkId>(8);
+        let chunk_ids = Buffer.Buffer<Assets.ChunkId>(8);
 
         for (async_chunk in async_chunks.vals()) {
             let { chunk_id } = await async_chunk;
@@ -235,14 +235,14 @@ actor {
         return Buffer.toArray(chunk_ids);
     };
 
-    func create_and_commit_batch(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func create_and_commit_batch(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
         // create batch
         let { batch_id } = await asset.create_batch({});
 
         // upload chunks in parallel
         let chunk_ids = await* upload_chunks(asset, batch_id, hello_world_identity_chunks);
 
-        let commit_args : Asset.CommitBatchArguments = {
+        let commit_args : Assets.CommitBatchArguments = {
             batch_id;
             operations = [
                 #CreateAsset({
@@ -264,7 +264,7 @@ actor {
 
         await asset.commit_batch(commit_args);
 
-        let get_args : Asset.GetArgs = {
+        let get_args : Assets.GetArgs = {
             key = "/hello";
             accept_encodings = ["gzip"];
             batch_id = batch_id;
@@ -286,10 +286,10 @@ actor {
 
     };
 
-    func get_asset_chunks(asset : AssetCanister.AssetCanister, owner : Principal, key : Asset.Key, chunks : [Blob]) : async* () {
+    func get_asset_chunks(asset : AssetsCanister.AssetsCanister, owner : Principal, key : Assets.Key, chunks : [Blob]) : async* () {
 
         for (i in Iter.range(0, hello_world_identity_chunks.size() - 1)) {
-            let get_chunk_args : Asset.GetChunkArgs = {
+            let get_chunk_args : Assets.GetChunkArgs = {
                 index = i;
                 key = "/hello";
                 content_encoding = "identity";
@@ -301,7 +301,7 @@ actor {
         };
     };
 
-    func propose_and_commit_batch(asset : AssetCanister.AssetCanister, owner : Principal) : async* () {
+    func propose_and_commit_batch(asset : AssetsCanister.AssetsCanister, owner : Principal) : async* () {
         await asset.revoke_permission({
             permission = #Commit;
             of_principal = owner;
@@ -317,7 +317,7 @@ actor {
         // upload chunks in parallel
         let chunk_ids = await* upload_chunks(asset, batch_id, hello_world_identity_chunks);
 
-        let commit_args : Asset.CommitBatchArguments = {
+        let commit_args : Assets.CommitBatchArguments = {
             batch_id;
             operations = [
                 #CreateAsset({
@@ -352,7 +352,7 @@ actor {
         let ?evidence = opt_evidence_blob else Debug.trap("evidence is null");
         await asset.commit_proposed_batch({ batch_id; evidence });
 
-        let get_args : Asset.GetArgs = {
+        let get_args : Assets.GetArgs = {
             key = "/hello";
             accept_encodings = ["gzip"];
             batch_id = batch_id;
@@ -374,7 +374,7 @@ actor {
 
     public func run_tests() : async () {
         Cycles.add<system>(200_000_000_000);
-        let asset = await AssetCanister.AssetCanister ( #Init({});
+        let asset = await AssetsCanister.AssetsCanister ( #Init({}));
         await asset.init();
         asset_canister_id := ?Principal.fromActor(asset);
         let authorized = await asset.list_authorized();

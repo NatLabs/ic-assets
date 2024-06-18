@@ -6,7 +6,7 @@ import Time "mo:base/Time";
 import { test; suite } "mo:test/async";
 
 import BaseAsset "../src/BaseAsset";
-import Asset "../src";
+import Assets "../src";
 import Migrations "../src/Migrations";
 
 import Canister "../src/Canister";
@@ -15,7 +15,7 @@ import Canister "../src/Canister";
 // let owner = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 let caller = Principal.fromText("tde7l-3qaaa-aaaah-qansa-cai");
 
-let asset = await Canister.AssetCanister(null);
+let asset = await Canister.AssetsCanister(null);
 await asset.init();
 let authorized = await asset.list_authorized();
 let owner = authorized[0];

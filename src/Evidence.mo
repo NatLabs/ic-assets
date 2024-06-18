@@ -12,7 +12,7 @@ import Map "mo:map/Map";
 import IC "mo:ic";
 import CertifiedAssets "mo:certified-assets";
 import Itertools "mo:itertools/Iter";
-import SHA256 "mo:sha2/Sha256/Static";
+import SHA256 "mo:sha2-shared/Sha256/Static";
 import Vector "mo:vector";
 
 import Utils "Utils";

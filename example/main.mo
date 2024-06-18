@@ -14,8 +14,8 @@ import Map "mo:map/Map";
 import HttpParser "mo:http-parser";
 import Itertools "mo:itertools/Iter";
 
-import AssetCanister "../src/Canister";
-import Asset "../src";
+import AssetsCanister "../src/Canister";
+import Assets "../src";
 
 shared ({ caller = owner }) actor class () = this_canister {
 
@@ -31,11 +31,11 @@ shared ({ caller = owner }) actor class () = this_canister {
     let raw_uploads : Map<Nat, Map<Nat, Blob>> = Map.new();
     let current_uploads : Map<Nat, Map<Text, File>> = Map.new();
 
-    stable var assets_sstore = Asset.init_stable_store(owner);
-    assets_sstore := Asset.migrate(assets_sstore);
-    let assets = Asset.Asset(assets_sstore);
+    stable var assets_sstore = Assets.init_stable_store(owner);
+    assets_sstore := Assets.migrate(assets_sstore);
+    let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Asset.StreamingToken) : async ?(Asset.StreamingCallbackResponse) {
+    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
         ?assets.http_request_streaming_callback(token_blob);
     };
 
@@ -48,16 +48,16 @@ shared ({ caller = owner }) actor class () = this_canister {
         await* update_homepage();
     };
 
-    func create_batch() : Asset.BatchId {
+    func create_batch() : Assets.BatchId {
         let { batch_id } = assets.create_batch(owner, {});
         let new_batch = Map.new<Text, File>();
         ignore Map.put(current_uploads, nhash, batch_id, new_batch);
         batch_id;
     };
 
-    func upload_chunks(batch_id : Asset.BatchId, chunks : [Blob]) : async* [Asset.ChunkId] {
-        // let async_chunks = Buffer.Buffer<async Asset.CreateChunkResponse>(8);
-        let chunk_ids = Buffer.Buffer<Asset.ChunkId>(8);
+    func upload_chunks(batch_id : Assets.BatchId, chunks : [Blob]) : async* [Assets.ChunkId] {
+        // let async_chunks = Buffer.Buffer<async Assets.CreateChunkResponse>(8);
+        let chunk_ids = Buffer.Buffer<Assets.ChunkId>(8);
 
         for (chunk in chunks.vals()) {
             let { chunk_id } = assets.create_chunk(owner, { batch_id = batch_id; content = chunk });
@@ -96,9 +96,9 @@ shared ({ caller = owner }) actor class () = this_canister {
 
     };
 
-    func commit_batch(batch_id : Asset.BatchId) : async* () {
+    func commit_batch(batch_id : Assets.BatchId) : async* () {
         let ?batch = Map.remove(current_uploads, nhash, batch_id) else Debug.trap("Batch not found");
-        let operations = Buffer.Buffer<Asset.BatchOperationKind>(8);
+        let operations = Buffer.Buffer<Assets.BatchOperationKind>(8);
 
         for ((file_name, file) in Map.entries(batch)) {
             let { content_type; chunk_ids; exists } = file;
@@ -130,10 +130,10 @@ shared ({ caller = owner }) actor class () = this_canister {
 
     };
 
-    func homepage(files : [Asset.AssetDetails]) : Text {
+    func homepage(files : [Assets.AssetDetails]) : Text {
         let files_list = Array.map(
             files,
-            func(file : Asset.AssetDetails) : Text {
+            func(file : Assets.AssetDetails) : Text {
                 let encoding = file.encodings[0];
 
                 "<li style=\"display:\"flex\"; flex-direction:\"row\" align-items: \"space-between\"; width=\"1vw\" \">
@@ -151,10 +151,10 @@ shared ({ caller = owner }) actor class () = this_canister {
             <head>
                 <meta charset=\"UTF-8\">
                 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-                <title>Asset Canister Example</title>
+                <title>Assets Canister Example</title>
             </head>
             <body>
-                <h1>Asset Canister Example</h1>
+                <h1>Assets Canister Example</h1>
 
                 <input type=\"file\" class=\"file-input\" multiple>
                 <input type=\"text\" class=\"file-name-input\" placeholder=\"add files to directory\">
@@ -329,7 +329,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         await* commit_batch(batch_id);
     };
 
-    public composite query func http_request(request : Asset.HttpRequest) : async Asset.HttpResponse {
+    public composite query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
         if (request.method == "POST" or request.method == "PUT" or request.method == "DELETE") {
             return {
                 upgrade = ?true;
@@ -343,7 +343,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         assets.http_request(request);
     };
 
-    func response(status_code : Nat16, message : Text) : Asset.HttpResponse {
+    func response(status_code : Nat16, message : Text) : Assets.HttpResponse {
         {
             status_code;
             body = Text.encodeUtf8(message);
@@ -353,7 +353,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         };
     };
 
-    public func http_request_update(request : Asset.HttpRequest) : async Asset.HttpResponse {
+    public func http_request_update(request : Assets.HttpRequest) : async Assets.HttpResponse {
 
         if (request.method == "POST" and request.url == "/upload") {
             Debug.print("Create Upload batch");

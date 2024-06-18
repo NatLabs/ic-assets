@@ -6,7 +6,7 @@ import None "mo:base/None";
 import { test; suite } "mo:test";
 
 import BaseAsset "../src/BaseAsset";
-import Asset "../src";
+import Assets "../src";
 import Migrations "../src/Migrations";
 
 suite(
@@ -35,6 +35,7 @@ func init_test_store(caller : Principal) : Migrations.VersionedStableStore {
         var next_batch_id = 1;
         deprecated_field = ();
         configuration = ();
+        streaming_callback = null
     };
 
     #_test(test_store);

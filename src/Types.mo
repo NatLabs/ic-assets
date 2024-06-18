@@ -43,7 +43,7 @@ module {
         sha256 : Blob;
     };
 
-    public type Asset = {
+    public type Assets = {
         var content_type : Text;
         encodings : Map<Text, AssetEncoding>;
         headers : Map<Text, Text>;
@@ -54,7 +54,7 @@ module {
     };
 
     public type AssetTree = {
-        #file : Asset;
+        #file : Assets;
         #directory : {
             root : Map<Text, AssetTree>;
         };
@@ -316,7 +316,7 @@ module {
 
         var canister_id : ?Principal;
         var streaming_callback : ?HttpTypes.StreamingCallback;
-        assets : Map<Key, Asset>;
+        assets : Map<Key, Assets>;
         certificate_store : CertifiedAssets.StableStore;
 
         configuration : Configuration;
@@ -335,7 +335,7 @@ module {
 
     public type StableStoreTestVersion = {
         canister_id : Principal;
-        assets : Map<Key, Asset>;
+        assets : Map<Key, Assets>;
         certificate_store : CertifiedAssets.StableStore;
 
         chunks : Map<ChunkId, Chunk>;

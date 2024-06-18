@@ -79,7 +79,7 @@ module {
         Migrations.migrate(asset_versions);
     };
 
-    public class Asset(sstore : VersionedStableStore) {
+    public class Assets(sstore : VersionedStableStore) {
         let state = Migrations.get_current_state(sstore);
 
         public func api_version() : Nat16 = BaseAsset.api_version();
