@@ -1,7 +1,20 @@
 [dependencies]
-base = "0.10.2"
+base = "0.11.0"
+http-types = "1.0.1"
+map = "9.0.1"
+certified-assets = "0.2.0"
+ic = "1.0.1"
+itertools = "0.2.1"
+vector = "0.2.0"
+sha2 = "https://github.com/NatLabs/sha2#main@c1019aff087090abd70bfa0de6ab2ed901a81916"
+encoding = "https://github.com/aviate-labs/encoding.mo#v0.4.1"
+http-parser = "0.2.0"
 
 [dev-dependencies]
-test = "1.0.1"
+test = "1.2.0"
 bench = "1.0.0"
-fuzz = "0.1.0"
+fuzz = "0.2.0"
+
+[toolchain]
+wasmtime = "15.0.0"
+moc = "0.11.1"

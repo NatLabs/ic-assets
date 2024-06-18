@@ -21,3 +21,9 @@ docs:  set-moc-version
 
 bench: set-dfx-moc-path
 	mops bench
+
+actor-test:
+	dfx deploy asset-test2
+	dfx ledger fabricate-cycles --canister asset-test
+	dfx ledger fabricate-cycles --canister asset-test2
+	dfx canister call asset-test2 run_tests

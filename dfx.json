@@ -1,15 +1,30 @@
 {
-    "version": 1,
-    "defaults": {
-        "build": {
-            "packtool": "mops sources",
-            "args": ""
-        }
+  "version": 1,
+  "canisters": {
+    "asset_canister": {
+      "type": "motoko",
+      "main": "src/Canister.mo",
+      "init_arg": "(null)"
     },
-    "networks": {
-        "local": {
-            "bind": "127.0.0.1:8000",
-            "type": "ephemeral"
-        }
+    "example": {
+      "type": "motoko",
+      "main": "example/main.mo"
+    },
+    "asset-test2": {
+      "type": "motoko",
+      "main": "tests/Asset.ActorTest.mo"
     }
+  },
+  "defaults": {
+    "build": {
+      "packtool": "mops sources",
+      "args": ""
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:8000",
+      "type": "ephemeral"
+    }
+  }
 }
