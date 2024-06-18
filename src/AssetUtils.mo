@@ -167,9 +167,15 @@ module {
 
         let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err("Encoding not found.");
 
-        let aliases = get_key_aliases(self, asset_key);
+        let aliases = if (asset.is_aliased == ?true) get_key_aliases(self, asset_key) else Itertools.empty();
 
-        for (key_or_alias in Itertools.add(aliases, asset_key)) {
+        let key_and_aliases = Itertools.add(aliases, asset_key);
+
+        // Debug.print("is_aliased: " # debug_show (asset.is_aliased));
+        // Debug.print("key_and_aliases: " # debug_show Iter.toArray(key_and_aliases));
+
+        for (key_or_alias in key_and_aliases) {
+            // Debug.print("Certifying " # key_or_alias # " with encoding " # encoding_name);
             let headers = build_headers(asset, encoding_name);
             let headers_array = Map.toArray(headers);
 
@@ -240,7 +246,7 @@ module {
         Iter.filter(
             aliases.vals(),
             func(alias : Text) : Bool {
-                Map.has(self.assets, thash, alias);
+                not Map.has(self.assets, thash, alias);
             },
         )
 
@@ -460,9 +466,13 @@ module {
         Vector.clear(encoding.content_chunks);
         Vector.addFromIter(encoding.content_chunks, Vector.vals(content_chunks));
 
-        let #ok(_) = certify_encoding(self, formatted_key, asset, args.content_encoding) else return #err("Failed to certify encoding.");
+        if (asset.is_aliased == ?true) {
+            for (alias in get_key_aliases(self, formatted_key)) {
+                ignore certify_encoding(self, alias, asset, args.content_encoding);
+            };
+        };
 
-        #ok();
+        certify_encoding(self, formatted_key, asset, args.content_encoding);
     };
 
     public func unset_asset_content(self : StableStore, args : T.UnsetAssetContentArguments) : Result<(), Text> {
@@ -515,7 +525,18 @@ module {
         let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
         switch (args.is_aliased) {
-            case (?is_aliased) asset.is_aliased := is_aliased;
+            case (??is_aliased) {
+                if (asset.is_aliased == ?true and is_aliased == false){
+                    for (alias in get_key_aliases(self, formatted_key)) {
+                        for (encoding in Map.keys(asset.encodings)) {
+                            ignore remove_encoding_certificate(self, alias, asset, encoding);
+                        };
+                    };
+                };
+                
+                asset.is_aliased := ?is_aliased
+            };
+            case(?null) asset.is_aliased := null;
             case (_) {};
         };
 
@@ -982,6 +1003,26 @@ module {
 
     };
 
+    func get_asset(self: StableStore, key: Text) : ?Assets {
+        switch(Map.get(self.assets, thash, key)) {
+            case (?asset) return ?asset;
+            case (_) {};
+        };
+
+        let reverse_alias = switch(get_key_from_aliase(self, key)) {
+            case (?key) key;
+            case (_) return null;
+        };
+
+        switch(Map.get(self.assets, thash, reverse_alias)) {
+            case (?asset) {
+                if (asset.is_aliased != ?true) return null;
+                return ?asset;
+            };
+            case (_) return null;
+        };
+    };
+
     public func build_http_response(self : StableStore, req : T.HttpRequest, url : URL, encodings : [Text]) : T.HttpResponse {
         let path = url.path.original;
 
@@ -990,7 +1031,7 @@ module {
             case (_) 2;
         };
 
-        let opt_asset = Map.get(self.assets, thash, path);
+        let opt_asset = get_asset(self, path);
         let opt_fallback = Map.get(self.assets, thash, FALLBACK_FILE);
 
         let asset = switch (opt_asset, opt_fallback) {

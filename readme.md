@@ -1,9 +1,9 @@
 ## IC-Assets
 
-A motoko library implementation of the [Assets Canister](https://github.com/dfinity/sdk/blob/master/docs/design/asset-canister-interface.md) with v2 certification.
+A motoko library implementation of the [Assets Canister](https://github.com/dfinity/sdk/blob/master/docs/design/asset-canister-interface.md) with v2 certification. Allows you to serve files from a canister and access it via the `<canister-id>.icp0.io` domain instead of `<canister-id>.raw.ic0.io` domain.
 
-Demo: [A simple frontend for uploading and serving certified files](https://ehvmc-gqaaa-aaaap-ahkwa-cai.icp0.io/homepage)
-The code for the demo is in the [example/main.mo](./example/main.mo) file.
+**Demo:** [A simple frontend for uploading and serving certified files](https://ehvmc-gqaaa-aaaap-ahkwa-cai.icp0.io/homepage) 
+> The code for the demo is in the [example/main.mo](./example/main.mo) file.
 
 ### Usage
 

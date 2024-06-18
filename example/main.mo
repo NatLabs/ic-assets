@@ -5,9 +5,11 @@ import Buffer "mo:base/Buffer";
 import Text "mo:base/Text";
 import Blob "mo:base/Blob";
 import Iter "mo:base/Iter";
+import Nat8 "mo:base/Nat8";
 import Nat32 "mo:base/Nat32";
 import Char "mo:base/Char";
 import Option "mo:base/Option";
+import Error "mo:base/Error";
 import Principal "mo:base/Principal";
 
 import Map "mo:map/Map";
@@ -110,7 +112,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                         content_type;
                         max_age = ?100_000_000_000;
                         headers = ?[];
-                        enable_aliasing = ?true;
+                        enable_aliasing = if (file_name == "/homepage") ?true else ?false;
                         allow_raw_access = ?true;
                     }),
 
@@ -206,9 +208,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                                         let req = fetch(`/upload/${batch_id}/${chunk_id}`, {
                                             method: 'PUT',
                                             body: chunks[chunk_id]
-                                        })
-                                        .then(data => console.log( data.text()))
-                                        .catch(response => reject());
+                                        });
 
                                         chunk_requests.push(req);
                                     }
@@ -354,98 +354,103 @@ shared ({ caller = owner }) actor class () = this_canister {
     };
 
     public func http_request_update(request : Assets.HttpRequest) : async Assets.HttpResponse {
+        try {
+            
+            if (request.method == "POST" and request.url == "/upload") {
+                let batch_id = create_batch();
+                Debug.print("Create Upload batch: " # debug_show batch_id);
+                let chunks = Map.new<Nat, Blob>();
+                ignore Map.put(chunks, nhash, 0, request.body);
+                ignore Map.put(raw_uploads, nhash, batch_id, chunks);
 
-        if (request.method == "POST" and request.url == "/upload") {
-            Debug.print("Create Upload batch");
-            let batch_id = create_batch();
-            let chunks = Map.new<Nat, Blob>();
-            ignore Map.put(chunks, nhash, 0, request.body);
-            ignore Map.put(raw_uploads, nhash, batch_id, chunks);
+                return response(200, debug_show batch_id);
 
-            Debug.print(debug_show { batch_id });
-            return response(200, debug_show batch_id);
+            } else if (request.method == "PUT" and Text.startsWith(request.url, #text("/upload"))) {
+                Debug.print("Upload chunk: " # debug_show request.url);
+                let parts = Iter.toArray(
+                    Text.split(
+                        Option.get(Text.stripStart(request.url, #text("/upload/")), request.url),
+                        #text("/"),
+                    )
+                );
 
-        } else if (request.method == "PUT" and Text.startsWith(request.url, #text("/upload"))) {
-            let parts = Iter.toArray(
-                Text.split(
-                    Option.get(Text.stripStart(request.url, #text("/upload/")), request.url),
-                    #text("/"),
-                )
-            );
+                let batch_id = nat_from_text(parts[0]);
+                let chunk_id = nat_from_text(parts[1]);
 
-            let batch_id = nat_from_text(parts[0]);
-            let chunk_id = nat_from_text(parts[1]);
+                Debug.print("upload chunks: " # debug_show ({ batch_id; chunk_id }));
 
-            Debug.print("upload chunks: " # debug_show ({ batch_id; chunk_id }));
+                let ?chunks = Map.get(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
+                ignore Map.put(chunks, nhash, chunk_id, request.body);
 
-            let ?chunks = Map.get(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
-            ignore Map.put(chunks, nhash, chunk_id, request.body);
+                return response(200, "Successfully uploaded chunk " # debug_show ({ batch_id; chunk_id }));
 
-            return response(200, "Successfully uploaded chunk " # debug_show ({ batch_id; chunk_id }));
+            } else if (request.method == "POST" and request.url == "/upload/commit") {
+                let ?text = Text.decodeUtf8(request.body) else return response(404, "no body");
+                let batch_id = nat_from_text(text);
+                Debug.print("Commit Upload batch: " # debug_show batch_id);
+                let ?chunks_map = Map.remove(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
 
-        } else if (request.method == "POST" and request.url == "/upload/commit") {
-            let ?text = Text.decodeUtf8(request.body) else return response(404, "no body");
-            let batch_id = nat_from_text(text);
-            Debug.print(debug_show { batch_id });
-            let ?chunks_map = Map.remove(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
+                // concatenate all the chunks
+                let chunked_bytes : [Iter.Iter<Nat8>] = Array.tabulate(
+                    Map.size(chunks_map),
+                    func(i : Nat) : Iter.Iter<Nat8> {
+                        let ?chunk = Map.get(chunks_map, nhash, i) else Debug.trap("Chunk not found");
+                        (chunk.vals());
+                    },
+                );
 
-            // concatenate all the chunks
-            let chunked_bytes : [Iter.Iter<Nat8>] = Array.tabulate(
-                Map.size(chunks_map),
-                func(i : Nat) : Iter.Iter<Nat8> {
-                    let ?chunk = Map.get(chunks_map, nhash, i) else Debug.trap("Chunk not found");
-                    (chunk.vals());
-                },
-            );
+                let concatenated_body : Blob = Blob.fromArray(Iter.toArray(Itertools.flatten(chunked_bytes.vals())));
 
-            let concatenated_body : Blob = Blob.fromArray(Iter.toArray(Itertools.flatten(chunked_bytes.vals())));
+                let plain_text = Text.join("", Iter.map(concatenated_body.vals(), func(n8: Nat8): Text{
+                    Char.toText(Char.fromNat32(Nat32.fromNat(Nat8.toNat(n8))))
+                }));
 
-            let http_parser_request = {
-                url = request.url;
-                method = request.method;
-                headers = [("content-type", "multipart/form-data")];
-                body = concatenated_body;
-            };
+                let #ok(form) = HttpParser.parseForm(concatenated_body, #multipart(null)) else return response(404, "no body");
+                Debug.print("plain text form: " # plain_text);
 
-            let req = HttpParser.parse(http_parser_request);
-            let ?body = req.body else return response(404, "no body");
+                Debug.print("filename: " # debug_show form.fileKeys);
+                Debug.print("fields: " # debug_show form.keys);
 
-            for (name in body.form.fileKeys.vals()) {
-                let ?files = body.form.files(name) else return response(404, "no forms");
+                for (filename in form.fileKeys.vals()) {
+                    let ?files = form.files(filename) else return response(404, "no forms");
 
-                for (file in files.vals()) {
+                    for (file in files.vals()) {
 
-                    Debug.print(
-                        debug_show [#text(name), #text(file.filename), #text(file.mimeType), #text(file.mimeSubType), #num(file.bytes.size()), #num(file.start), #num(file.end)]
-                    );
+                        Debug.print(
+                            debug_show [#text(filename), #text(file.mimeType), #text(file.mimeSubType), #num(file.bytes.size()), #num(file.start), #num(file.end)]
+                        );
 
-                    await* upload(batch_id, file.filename, file.mimeType # "/" # file.mimeSubType, [Blob.fromArray(Buffer.toArray(file.bytes))]);
+                        await* upload(
+                            batch_id, 
+                            file.filename, 
+                            if (file.mimeType == "") "" else (file.mimeType # "/" # file.mimeSubType), 
+                            [Blob.fromArray(Buffer.toArray(file.bytes))]
+                        );
+                    };
                 };
+
+                await* commit_batch(batch_id);
+                await* update_homepage();
+
+                return response(200, debug_show batch_id);
+
+            } else if (request.method == "DELETE" and request.url == "/upload") {
+                let ?key = Text.decodeUtf8(request.body) else return response(404, "no key");
+
+                Debug.print("deleting: " # debug_show key);
+                assets.delete_asset(owner, { key });
+                await* update_homepage();
+
+                return response (200, "Successfully deleted " # debug_show key);
             };
 
-            await* commit_batch(batch_id);
-            await* update_homepage();
-
-            return response(200, debug_show batch_id);
-
-        } else if (request.method == "DELETE" and request.url == "/upload") {
-            let ?key = Text.decodeUtf8(request.body) else return response(404, "no key");
-
-            Debug.print("deleting: " # debug_show key);
-            assets.delete_asset(owner, { key });
-            await* update_homepage();
-
-            return {
-                upgrade = ?true;
-                headers = [];
-                status_code = 200;
-                body = "Successfully deleted ";
-                streaming_strategy = null;
-            };
-
-        };
-
-        return response(404, "Not found");
+            return response(404, "Not found");
+        } catch(e){
+            Debug.print("this might be a trap!");
+            Debug.print("Error: " # debug_show (Error.code(e), Error.message(e)));
+            // return response(500, "Internal Server Error");
+            throw e;
+        }
     };
 
     func _canister_id() : Principal {
