@@ -9,10 +9,9 @@ import Blob "mo:base/Blob";
 import Set "mo:map/Set";
 import Map "mo:map/Map";
 import IC "mo:ic";
-import CertifiedAssets "mo:certified-assets";
+import CertifiedAssets "mo:certified-assets/Stable";
 import Itertools "mo:itertools/Iter";
 import { URL; Headers } "mo:http-parser";
-import HttpTypes "mo:http-types";
 import HttpParser "mo:http-parser";
 
 import T "Types";
@@ -110,13 +109,21 @@ module {
         self.canister_id := ?canister_id;
     };
 
-    public func set_streaming_callback(self : StableStore, callback : HttpTypes.StreamingCallback) {
+    public func set_streaming_callback(self : StableStore, callback : T.StreamingCallback) {
         self.streaming_callback := ?callback;
+    };
+
+    public func get_streaming_callback(self : StableStore) : ?T.StreamingCallback {
+        self.streaming_callback;
+    };
+
+    public func get_canister_id(self : StableStore) : ?Principal {
+        self.canister_id;
     };
 
     public func http_request_streaming_callback(self : StableStore, token_blob : T.StreamingToken) : T.StreamingCallbackResponse {
         let res = AssetUtils.http_request_streaming_callback(self, token_blob);
-        let streaming_response = Utils.extract_result(res);
+        // let streaming_response = Utils.extract_result(res);
     };
 
     public func from_version(versions : T.VersionedStableStore) : StableStore {
@@ -162,9 +169,9 @@ module {
         Utils.extract_result(AssetUtils.create_asset(self, args));
     };
 
-    public func set_asset_content(self : StableStore, caller : Principal, args : SetAssetContentArguments) : () {
+    public func set_asset_content(self : StableStore, caller : Principal, args : SetAssetContentArguments) : async* () {
         Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.set_asset_content(self, args));
+        Utils.extract_result(await* AssetUtils.set_asset_content(self, args));
     };
 
     public func unset_asset_content(self : StableStore, caller : Principal, args : T.UnsetAssetContentArguments) : () {

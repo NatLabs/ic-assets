@@ -3,11 +3,9 @@ import Time "mo:base/Time";
 
 import Set "mo:map/Set";
 import Map "mo:map/Map";
-import CertifiedAssets "mo:certified-assets";
+import CertifiedAssets "mo:certified-assets/Stable";
 import SHA256 "Sha256/class";
 import Vector "mo:vector";
-
-import HttpTypes "mo:http-types";
 
 module {
 
@@ -80,13 +78,13 @@ module {
 
     public type NextOperation = {
         operation_index : Nat;
-        hasher : SHA256.StaticSha256;
+        hasher_state : SHA256.StaticSha256;
     };
 
     public type NextChunkIndex = {
         operation_index : Nat;
         chunk_index : Nat;
-        hasher : SHA256.StaticSha256;
+        hasher_state : SHA256.StaticSha256;
     };
 
     public type EvidenceComputation = {
@@ -111,7 +109,7 @@ module {
         key : Key;
         content_type : Text;
         max_age : ?Nat64;
-        headers : ?[HttpTypes.Header];
+        headers : ?[Header];
         enable_aliasing : ?Bool;
         allow_raw_access : ?Bool;
     };
@@ -139,7 +137,7 @@ module {
     public type SetAssetPropertiesArguments = {
         key : Key;
         max_age : ??Nat64;
-        headers : ??[HttpTypes.Header];
+        headers : ??[Header];
         allow_raw_access : ??Bool;
         is_aliased : ??Bool;
     };
@@ -281,7 +279,7 @@ module {
 
     public type AssetProperties = {
         max_age : ?Nat64;
-        headers : ?[HttpTypes.Header];
+        headers : ?[Header];
         allow_raw_access : ?Bool;
         is_aliased : ?Bool;
     };
@@ -299,23 +297,54 @@ module {
 
     public type Contents = Blob;
 
-    public type HttpResponse = HttpTypes.Response;
-    public type HttpRequest = HttpTypes.Request;
-    public type StreamingCallback = HttpTypes.StreamingCallback;
-    public type StreamingToken = HttpTypes.StreamingToken;
-    public type CustomStreamingToken = {
+    public type Header = (Text, Text);
+
+    public type HttpResponse = {
+        status_code : Nat16;
+        headers : [Header];
+        body : Blob;
+        streaming_strategy : ?StreamingStrategy;
+        upgrade : ?Bool;
+    };
+
+    public type HttpRequest = {
+        url : Text;
+        method : Text;
+        headers : [Header];
+        body : Blob;
+        certificate_version : ?Nat16;
+    };
+
+    public type StreamingStrategy = {
+        #Callback : {
+            callback : StreamingCallback;
+            token : StreamingToken;
+        };
+    };
+
+    public type StreamingCallback = shared query (StreamingToken) -> async StreamingCallbackResponse;
+    public type StreamingToken = {
         key : Key;
         sha256 : ?Blob;
         content_encoding : Text;
         index : Nat;
     };
-    public type StreamingCallbackResponse = HttpTypes.StreamingCallbackResponse;
+    public type CustomStreamingToken = StreamingToken;
+    public type StreamingCallbackResponse = {
+        body : Blob;
+        token : ?StreamingToken;
+    };
+
+    public type StreamingCallbackResponseAny = {
+        body : Blob;
+        token : ?Any;
+    };
 
     // Migrations
     public type StableStoreV0 = {
 
         var canister_id : ?Principal;
-        var streaming_callback : ?HttpTypes.StreamingCallback;
+        var streaming_callback : ?StreamingCallback;
         assets : Map<Key, Assets>;
         certificate_store : CertifiedAssets.StableStore;
 
@@ -440,8 +469,8 @@ module {
         // /// Compute a hash over the CommitBatchArguments.  Call until it returns Some(evidence).
         compute_evidence : shared (ComputeEvidenceArguments) -> async (?Blob);
 
-        http_request : (HttpTypes.Request) -> async (HttpTypes.Response);
-        http_request_streaming_callback : HttpTypes.StreamingCallback;
+        http_request : (HttpRequest) -> async (HttpResponse);
+        http_request_streaming_callback : StreamingCallback;
 
     };
 

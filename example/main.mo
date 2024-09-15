@@ -13,10 +13,11 @@ import Error "mo:base/Error";
 import Principal "mo:base/Principal";
 
 import Map "mo:map/Map";
+import Vector "mo:vector";
 import HttpParser "mo:http-parser";
 import Itertools "mo:itertools/Iter";
+// import Web "mo:web-io";
 
-import AssetsCanister "../src/Canister";
 import Assets "../src";
 
 shared ({ caller = owner }) actor class () = this_canister {
@@ -25,6 +26,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         content_type : Text;
         chunk_ids : Buffer.Buffer<Nat>;
         exists : Bool;
+        var is_committed : Bool;
     };
 
     let { nhash; thash } = Map;
@@ -37,8 +39,8 @@ shared ({ caller = owner }) actor class () = this_canister {
     assets_sstore := Assets.migrate(assets_sstore);
     let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
-        ?assets.http_request_streaming_callback(token_blob);
+    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
+        assets.http_request_streaming_callback(token_blob);
     };
 
     // Acts as the initialization function for the canister.
@@ -47,17 +49,19 @@ shared ({ caller = owner }) actor class () = this_canister {
         let id = _canister_id();
         assets.set_canister_id(id);
         assets.set_streaming_callback(http_request_streaming_callback);
+
+        assert assets.get_streaming_callback() == ?http_request_streaming_callback;
         await* update_homepage();
     };
 
-    func create_batch() : Assets.BatchId {
+    func create_batch() : (Assets.BatchId) {
         let { batch_id } = assets.create_batch(owner, {});
         let new_batch = Map.new<Text, File>();
         ignore Map.put(current_uploads, nhash, batch_id, new_batch);
         batch_id;
     };
 
-    func upload_chunks(batch_id : Assets.BatchId, chunks : [Blob]) : async* [Assets.ChunkId] {
+    func upload_chunks(batch_id : Assets.BatchId, chunks : [Blob]) : [Assets.ChunkId] {
         // let async_chunks = Buffer.Buffer<async Assets.CreateChunkResponse>(8);
         let chunk_ids = Buffer.Buffer<Assets.ChunkId>(8);
 
@@ -84,6 +88,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                     content_type;
                     chunk_ids = Buffer.Buffer<Nat>(8);
                     exists = assets.exists(file_name);
+                    var is_committed = false;
                 };
 
                 ignore Map.put(batch, thash, file_name, file);
@@ -91,7 +96,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
         };
 
-        let chunk_ids = await* upload_chunks(batch_id, chunks);
+        let chunk_ids = upload_chunks(batch_id, chunks);
         for (chunk_id in chunk_ids.vals()) {
             file.chunk_ids.add(chunk_id);
         };
@@ -122,6 +127,9 @@ shared ({ caller = owner }) actor class () = this_canister {
             operations.add(#SetAssetContent({ key = file_name; content_encoding = "identity"; chunk_ids = Buffer.toArray(chunk_ids); sha256 = null }));
         };
 
+        // Debug.print("Committing batch: " # debug_show batch_id);
+        // Debug.print("Operations: " # debug_show Buffer.toArray(operations));
+
         await* assets.commit_batch(
             owner,
             {
@@ -137,9 +145,10 @@ shared ({ caller = owner }) actor class () = this_canister {
             files,
             func(file : Assets.AssetDetails) : Text {
                 let encoding = file.encodings[0];
+                // Debug.print("homepage: " # debug_show (file.key, HttpParser.decodeURIComponent(HttpParser.encodeURI(file.key))));
 
                 "<li style=\"display:\"flex\"; flex-direction:\"row\" align-items: \"space-between\"; width=\"1vw\" \">
-                    <a href=\"" # file.key # "\">" # file.key # "</a>
+                    <a href=\"" # HttpParser.encodeURI(file.key) # "\">" # file.key # "</a>
                     <span> - [" # file.content_type # "]      </span>
                     <span> -  <b>" # debug_show (encoding.length) # "</b> Bytes      </span>
                     <button>Delete</button>
@@ -168,25 +177,17 @@ shared ({ caller = owner }) actor class () = this_canister {
                 </ul>
 
                 <script>
-                    document.querySelector('.upload-button').addEventListener('click', uploadFile);
+                    document.querySelector('.upload-button').addEventListener('click', uploadFiles);
 
-                    async function uploadFile() {
+                    const MAX_CHUNK_SIZE = 1_887_436; // should be 2mb but is 1.8mb to account for the other data in the request like method and headers
+
+                    async function uploadFiles() {
                         const fileInput = document.querySelector('.file-input');
                         const file_name_input = document.querySelector('.file-name-input');
                         const files = fileInput.files;
                         let prefix = file_name_input.value;
 
                         if (files.length > 0) {
-                            const formData = new FormData();
-                            for (let i = 0; i < files.length; i++) {
-                                const file = files[i];
-                                let prefixedFileName = file.name;
-                                prefix = '/' + prefix.split('/').filter((t) => t !== '').join('/')
-                                if (prefix !== \"\") prefixedFileName= `${prefix}/${file.name}`;
-
-                                const prefixedFile = new File([file], prefixedFileName, { type: file.type });
-                                formData.append('files[]', prefixedFile);
-                            }
 
                             const convert_to_bytes = async (formData) => {
                                 return new Promise((resolve, reject) => {
@@ -200,12 +201,12 @@ shared ({ caller = owner }) actor class () = this_canister {
                                 });
                             };
 
-                            const upload_chunks = async (batch_id, chunks, start_id) => {
+                            const upload_chunks = async (batch_id, filename, content_type, chunks, start_id = 0) => {
                                 return new Promise(async (resolve, reject) => {
                                     if (start_id >= chunks.length) return resolve();
                                     let chunk_requests = [];
                                     for (let chunk_id = start_id; chunk_id < chunks.length; chunk_id += 1) {
-                                        let req = fetch(`/upload/${batch_id}/${chunk_id}`, {
+                                        let req = fetch(`/upload/${batch_id}/${chunk_id}?content-type=${content_type}&filename=${filename}&total_chunks=${chunks.length}`, {
                                             method: 'PUT',
                                             body: chunks[chunk_id]
                                         });
@@ -218,82 +219,53 @@ shared ({ caller = owner }) actor class () = this_canister {
                                 });
                             };
 
-                            const form_data_to_blob = async (formData) => {
-                                const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substr(2);
-
-                                // Convert FormData to an array of form-data parts
-                                const formDataParts = [];
-                                for (const [name, value] of formData.entries()) {
-                                    if (value instanceof File) {
-                                        formDataParts.push(
-                                            `--${boundary}\\r\\n` +
-                                            `Content-Disposition: form-data; name=\"${name}\"; filename=\"${value.name}\"\\r\\n` +
-                                            `Content-Type: ${value.type}\\r\\n\\r\\n`
-                                        );
-
-                                        const array_buffer = await convert_to_bytes(value);
-                                        const uint8_array = new Uint8Array(array_buffer);
-                                        formDataParts.push(uint8_array);
-                                        formDataParts.push('\\r\\n');
-
-                                    } else {
-                                        formDataParts.push(
-                                            `--${boundary}\\r\\n` +
-                                            `Content-Disposition: form-data; name=\"${name}\"\\r\\n\\r\\n`
-                                        );
-
-                                        const array_buffer = await readFileAsArrayBuffer(value);
-                                        const uint8_array = new Uint8Array(array_buffer);
-                                        formDataParts.push(uint8_array);
-                                        formDataParts.push(`\\r\\n`);
-                                    }
-                                }
-                                formDataParts.push(`--${boundary}--\\r\\n`);
-
-                                // Create a Blob from the form-data parts
-                                let blob =  new Blob(formDataParts, { type: 'multipart/form-data; boundary=' + boundary });
-                                return await convert_to_bytes(blob);
-                            }
-
-                            let form_data_array = await form_data_to_blob(formData);
-
-                            console.log({form_data_array})
-                            let chunks = [];
-                            let chunk_size = (1024 ** 2) * 1.5;
-                            for (let i = 0; i < form_data_array.length; i += i + chunk_size) {
-                                chunks.push(form_data_array.slice(i, i + chunk_size));
-                            }
-
-                            console.log({chunks})
-
-                            let response = await fetch('/upload', {
+                            let batch_id = await fetch(`/upload`, { // should add number of files
                                 method: 'POST',
-                                body: chunks[0]
-                            });
-
-                            let response_text = await response.text();
-                            console.log({ response_text })
-                            let batch_id = new Number(response_text);
+                            })
+                            .then((response) => response.text())
+                            .then((text) => new Number(text));
                             console.log({ batch_id })
 
-                            await upload_chunks(batch_id, chunks, 1);
+                            let prefixed_file_names = []
+                            for (let i = 0; i < files.length; i++) {
+                                const file = files[i];
+                                let prefixedFileName = file.name;
+                                prefix = '/' + prefix.split('/').filter((t) => t !== '').join('/')
+                                if (prefix !== \"\") prefixedFileName= `${prefix}/${file.name}`;
 
-                            await fetch('/upload/commit', {
-                                method: 'POST',
-                                body: batch_id
-                            })
-                            .then(_x => window.location.reload())
-                            .catch(response => alert('Error:', response));
+                                console.log({prefixedFileName, prefix, filename: file.name})
+
+                                const prefixedFile = new File([file], prefixedFileName, { type: file.type });
+                                prefixed_file_names.push(prefixedFileName);
+
+                                const file_bytes = await convert_to_bytes(prefixedFile);
+
+                                const file_bytes_chunks = [];
+                                for (let i = 0; i < file_bytes.length; i += MAX_CHUNK_SIZE) {
+                                    file_bytes_chunks.push(file_bytes.slice(i, i + MAX_CHUNK_SIZE));
+                                }
+
+                                await upload_chunks(batch_id, prefixedFileName, file.type, file_bytes_chunks);
+                            }
+
+                            for (prefixed_file_name of prefixed_file_names) {
+                                console.log(\"about to commit \", prefixed_file_name);
+                                await fetch(`/upload/commit/${batch_id}?filename=${prefixed_file_name}`, {
+                                    method: 'POST',
+                                })
+                                .catch(response => alert('Error:', response));
+                            }
+
+                            window.location.reload()
 
                         } else {
                             alert('Please select a file or directory to upload.');
                         }
                     }
 
-                    function deleteFile(key){
-                        fetch('/upload', {
+                    function deleteFile(filename){
+                        fetch(`/upload?filename=${filename}`, {
                             method: 'DELETE',
-                            body: key
                         })
                         .then(response => response.text())
                         .then(data => {
@@ -330,6 +302,10 @@ shared ({ caller = owner }) actor class () = this_canister {
     };
 
     public composite query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
+        assert ?_canister_id() == assets.get_canister_id();
+        assert assets.get_streaming_callback() == ?http_request_streaming_callback;
+        // Debug.print("request before parsing: " # debug_show { request with body = "" });
+
         if (request.method == "POST" or request.method == "PUT" or request.method == "DELETE") {
             return {
                 upgrade = ?true;
@@ -340,7 +316,9 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
         };
 
-        assets.http_request(request);
+        let url = HttpParser.URL(request.url, HttpParser.Headers([]));
+
+        assets.http_request({ request with url = url.original });
     };
 
     func response(status_code : Nat16, message : Text) : Assets.HttpResponse {
@@ -353,104 +331,115 @@ shared ({ caller = owner }) actor class () = this_canister {
         };
     };
 
-    public func http_request_update(request : Assets.HttpRequest) : async Assets.HttpResponse {
+    public func http_request_update(_request : Assets.HttpRequest) : async Assets.HttpResponse {
         try {
-            
-            if (request.method == "POST" and request.url == "/upload") {
-                let batch_id = create_batch();
-                Debug.print("Create Upload batch: " # debug_show batch_id);
-                let chunks = Map.new<Nat, Blob>();
-                ignore Map.put(chunks, nhash, 0, request.body);
-                ignore Map.put(raw_uploads, nhash, batch_id, chunks);
+            let url = HttpParser.URL(_request.url, HttpParser.Headers([]));
+            // Debug.print("request after parsing: " # debug_show { url = url.original });
 
+            if (_request.method == "POST" and url.path.array[0] == "upload" and url.path.array.size() == 1) {
+                // Debug.print("new request: creating batch");
+                let batch_id = create_batch();
+                // Debug.print("Create Upload batch: " # debug_show batch_id);
                 return response(200, debug_show batch_id);
 
-            } else if (request.method == "PUT" and Text.startsWith(request.url, #text("/upload"))) {
-                Debug.print("Upload chunk: " # debug_show request.url);
-                let parts = Iter.toArray(
-                    Text.split(
-                        Option.get(Text.stripStart(request.url, #text("/upload/")), request.url),
-                        #text("/"),
-                    )
-                );
+            } else if (_request.method == "PUT" and url.path.array[0] == "upload") {
+                // Debug.print("uploading chunks: " # debug_show url.original);
 
-                let batch_id = nat_from_text(parts[0]);
-                let chunk_id = nat_from_text(parts[1]);
+                let batch_id = nat_from_text(url.path.array[1]);
+                let chunk_id = nat_from_text(url.path.array[2]);
 
-                Debug.print("upload chunks: " # debug_show ({ batch_id; chunk_id }));
+                let ?filename = url.queryObj.get("filename");
 
-                let ?chunks = Map.get(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
-                ignore Map.put(chunks, nhash, chunk_id, request.body);
+                // Debug.print("upload chunks: " # debug_show ({ batch_id; filename; chunk_id }));
 
-                return response(200, "Successfully uploaded chunk " # debug_show ({ batch_id; chunk_id }));
-
-            } else if (request.method == "POST" and request.url == "/upload/commit") {
-                let ?text = Text.decodeUtf8(request.body) else return response(404, "no body");
-                let batch_id = nat_from_text(text);
-                Debug.print("Commit Upload batch: " # debug_show batch_id);
-                let ?chunks_map = Map.remove(raw_uploads, nhash, batch_id) else return response(404, "Upload not found");
-
-                // concatenate all the chunks
-                let chunked_bytes : [Iter.Iter<Nat8>] = Array.tabulate(
-                    Map.size(chunks_map),
-                    func(i : Nat) : Iter.Iter<Nat8> {
-                        let ?chunk = Map.get(chunks_map, nhash, i) else Debug.trap("Chunk not found");
-                        (chunk.vals());
-                    },
-                );
-
-                let concatenated_body : Blob = Blob.fromArray(Iter.toArray(Itertools.flatten(chunked_bytes.vals())));
-
-                let plain_text = Text.join("", Iter.map(concatenated_body.vals(), func(n8: Nat8): Text{
-                    Char.toText(Char.fromNat32(Nat32.fromNat(Nat8.toNat(n8))))
-                }));
-
-                let #ok(form) = HttpParser.parseForm(concatenated_body, #multipart(null)) else return response(404, "no body");
-                Debug.print("plain text form: " # plain_text);
-
-                Debug.print("filename: " # debug_show form.fileKeys);
-                Debug.print("fields: " # debug_show form.keys);
-
-                for (filename in form.fileKeys.vals()) {
-                    let ?files = form.files(filename) else return response(404, "no forms");
-
-                    for (file in files.vals()) {
-
-                        Debug.print(
-                            debug_show [#text(filename), #text(file.mimeType), #text(file.mimeSubType), #num(file.bytes.size()), #num(file.start), #num(file.end)]
-                        );
-
-                        await* upload(
-                            batch_id, 
-                            file.filename, 
-                            if (file.mimeType == "") "" else (file.mimeType # "/" # file.mimeSubType), 
-                            [Blob.fromArray(Buffer.toArray(file.bytes))]
-                        );
+                let files_batch = switch (Map.get(current_uploads, nhash, batch_id)) {
+                    case (?files_batch) { files_batch };
+                    case (null) {
+                        let files_batch = Map.new<Text, File>();
+                        ignore Map.put(current_uploads, nhash, batch_id, files_batch);
+                        files_batch;
                     };
                 };
 
-                await* commit_batch(batch_id);
-                await* update_homepage();
+                let file = switch (Map.get(files_batch, thash, filename)) {
+                    case (?file) file;
+                    case (null) {
+                        let ?content_type = url.queryObj.get("content-type");
+                        // Debug.print("Create new file: " # debug_show ({ batch_id; filename; content_type }));
+                        let ?total_chunks_text = (url.queryObj.get("total_chunks"));
+                        let total_chunks = nat_from_text(total_chunks_text);
+
+                        let file : File = {
+                            content_type;
+                            chunk_ids = Buffer.fromArray<Nat>(
+                                Array.tabulate<Nat>(
+                                    total_chunks,
+                                    func(i : Nat) : Nat { 0 },
+                                )
+                            );
+                            exists = assets.exists(filename);
+                            var is_committed = false;
+                        };
+
+                        ignore Map.put(files_batch, thash, filename, file);
+                        file;
+
+                    };
+                };
+
+                let uploaded_chunk_ids = upload_chunks(batch_id, [_request.body]);
+
+                // for (uploaded_chunk_id in uploaded_chunk_ids.vals()) {
+                //     file.chunk_ids.add(uploaded_chunk_id);
+                // };
+
+                file.chunk_ids.put(chunk_id, uploaded_chunk_ids[0]);
+
+                return response(200, "Successfully uploaded chunk " # debug_show ({ batch_id; filename; chunk_id }));
+
+            } else if (_request.method == "POST" and url.path.array[0] == "upload" and url.path.array[1] == "commit") {
+                let parts = url.path.array;
+                // Debug.print("committing: " # debug_show parts);
+
+                let batch_id = nat_from_text(parts[2]);
+                let ?filename = url.queryObj.get("filename");
+
+                // Debug.print("Commit Upload batch: " # debug_show batch_id);
+
+                let ?files_batch = Map.get(current_uploads, nhash, batch_id) else return response(404, "Batch not found");
+                let ?file = Map.get(files_batch, thash, filename) else return response(404, "File not found");
+
+                file.is_committed := true;
+
+                if (Itertools.all(Map.vals(files_batch), func(file : File) : Bool { file.is_committed })) {
+
+                    // Debug.print("Committing batch: " # debug_show batch_id);
+                    await* commit_batch(batch_id);
+                    await* update_homepage();
+                };
+
+                ignore Map.remove(current_uploads, nhash, batch_id);
 
                 return response(200, debug_show batch_id);
 
-            } else if (request.method == "DELETE" and request.url == "/upload") {
-                let ?key = Text.decodeUtf8(request.body) else return response(404, "no key");
+            } else if (_request.method == "DELETE" and url.path.array[0] == "upload") {
 
-                Debug.print("deleting: " # debug_show key);
+                let ?key = url.queryObj.get("filename");
+
+                // Debug.print("deleting: " # debug_show key);
                 assets.delete_asset(owner, { key });
                 await* update_homepage();
 
-                return response (200, "Successfully deleted " # debug_show key);
+                return response(200, "Successfully deleted " # debug_show key);
             };
 
             return response(404, "Not found");
-        } catch(e){
+        } catch (e) {
             Debug.print("this might be a trap!");
             Debug.print("Error: " # debug_show (Error.code(e), Error.message(e)));
             // return response(500, "Internal Server Error");
             throw e;
-        }
+        };
     };
 
     func _canister_id() : Principal {

@@ -71,8 +71,8 @@ shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.Ca
 
     let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
-        ?assets.http_request_streaming_callback(token_blob);
+    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
+        assets.http_request_streaming_callback(token_blob);
     };
 
     public query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
@@ -130,7 +130,7 @@ shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.Ca
     };
 
     public shared ({ caller }) func set_asset_content(args : Assets.SetAssetContentArguments) : async () {
-        assets.set_asset_content(caller, args);
+        await* assets.set_asset_content(caller, args);
     };
 
     public shared ({ caller }) func unset_asset_content(args : Assets.UnsetAssetContentArguments) : async () {

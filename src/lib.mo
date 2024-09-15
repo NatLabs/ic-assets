@@ -92,6 +92,14 @@ module {
             BaseAsset.set_streaming_callback(state, callback);
         };
 
+        public func get_streaming_callback() : ?StreamingCallback {
+            BaseAsset.get_streaming_callback(state);
+        };
+
+        public func get_canister_id() : ?Principal {
+            BaseAsset.get_canister_id(state);
+        };
+
         public func http_request_streaming_callback(token_blob : StreamingToken) : StreamingCallbackResponse {
             BaseAsset.http_request_streaming_callback(state, token_blob);
         };
@@ -129,8 +137,8 @@ module {
             BaseAsset.create_asset(state, caller, args);
         };
 
-        public func set_asset_content(caller : Principal, args : SetAssetContentArguments) : () {
-            BaseAsset.set_asset_content(state, caller, args);
+        public func set_asset_content(caller : Principal, args : SetAssetContentArguments) : async* () {
+            await* BaseAsset.set_asset_content(state, caller, args);
         };
 
         public func unset_asset_content(caller : Principal, args : T.UnsetAssetContentArguments) : () {

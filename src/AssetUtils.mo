@@ -16,12 +16,11 @@ import Buffer "mo:base/Buffer";
 import Set "mo:map/Set";
 import Map "mo:map/Map";
 import IC "mo:ic";
-import CertifiedAssets "mo:certified-assets";
+import CertifiedAssets "mo:certified-assets/Stable";
 import Itertools "mo:itertools/Iter";
-import Sha256 "Sha256/class";
+import Sha256 "mo:sha2/Sha256";
 import Vector "mo:vector";
 import HttpParser "mo:http-parser";
-import HttpTypes "mo:http-types";
 import Hex "mo:encoding/Hex";
 
 import Utils "Utils";
@@ -165,6 +164,8 @@ module {
 
     public func certify_encoding(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text) : Result<(), Text> {
 
+        Debug.print("Certify encoding called on " # asset_key # " with encoding " # encoding_name);
+
         let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err("Encoding not found.");
 
         let aliases = if (asset.is_aliased == ?true) get_key_aliases(self, asset_key) else Itertools.empty();
@@ -175,18 +176,19 @@ module {
         // Debug.print("key_and_aliases: " # debug_show Iter.toArray(key_and_aliases));
 
         for (key_or_alias in key_and_aliases) {
-            // Debug.print("Certifying " # key_or_alias # " with encoding " # encoding_name);
+
+            Debug.print("Certifying " # key_or_alias # " with encoding " # encoding_name);
             let headers = build_headers(asset, encoding_name);
             let headers_array = Map.toArray(headers);
 
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
             .response_headers(headers_array).status(200);
 
-            let empty_body : Blob = "";
-            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, ?empty_body).no_request_certification().response_headers(headers_array).status(304);
+            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304);
 
             CertifiedAssets.certify(self.certificate_store, success_endpoint);
             CertifiedAssets.certify(self.certificate_store, not_modified_endpoint);
+
         };
 
         #ok();
@@ -206,8 +208,7 @@ module {
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
             .response_headers(headers_array).status(200);
 
-            let empty_body : Blob = "";
-            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, ?empty_body).no_request_certification().response_headers(headers_array).status(304);
+            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304);
 
             CertifiedAssets.remove(self.certificate_store, success_endpoint);
             CertifiedAssets.remove(self.certificate_store, not_modified_endpoint);
@@ -216,16 +217,37 @@ module {
         #ok();
     };
 
-    func certify_asset(self : StableStore, key : Text, asset : Assets) {
-        // delete all previous certifications associated with the asset's key
-        for ((encoding_name, encoding) in Map.entries(asset.encodings)) {
-            ignore remove_encoding_certificate(self, key, asset, encoding_name);
-            encoding.certified := false;
+    // certifies all encodings of an asset
+    // > remember to delete all previous certifications associated with the asset's key
+    // > before their data is modified by calling remove_asset_certificates
+
+    func certify_asset(self : StableStore, key : Text, asset : Assets, opt_encoding_name : ?Text) {
+
+        let encodings = switch (opt_encoding_name) {
+            case (?encoding_name) switch (Map.get(asset.encodings, thash, encoding_name)) {
+                case (?encoding) [(encoding_name, encoding)].vals();
+                case (_) Debug.trap("certify_asset(): Encoding not found.");
+            };
+            case (_) Map.entries(asset.encodings);
         };
 
-        for ((encoding_name, encoding) in Map.entries(asset.encodings)) {
+        for ((encoding_name, encoding) in encodings) {
             ignore certify_encoding(self, key, asset, encoding_name);
             encoding.certified := true;
+        };
+    };
+
+    func remove_asset_certificates(self : StableStore, key : Text, asset : Assets, opt_encoding_name : ?Text) {
+        let encoding_names = switch (opt_encoding_name) {
+            case (?encoding_name) [encoding_name].vals();
+            case (_) Map.keys(asset.encodings);
+        };
+
+        for (encoding_name in encoding_names) {
+            let ?encoding = Map.get(asset.encodings, thash, encoding_name) else Debug.trap("remove_asset_certificates(): Encoding not found.");
+            ignore remove_encoding_certificate(self, key, asset, encoding_name);
+            encoding.certified := false;
+
         };
     };
 
@@ -266,9 +288,6 @@ module {
         let formatted_key = format_key(args.key);
         let asset = Utils.map_get_or_put(self.assets, thash, formatted_key, new_asset);
 
-        asset.content_type := args.content_type;
-        asset.is_aliased := args.is_aliased;
-
         let hash = Sha256.fromBlob(#sha256, args.content);
 
         switch (args.sha256) {
@@ -280,6 +299,9 @@ module {
             case (_) ();
         };
 
+        // remove previous certificates
+        remove_asset_certificates(self, formatted_key, asset, null);
+
         let encoding = Utils.map_get_or_put(asset.encodings, thash, args.content_encoding, new_encoding);
 
         encoding.modified := Time.now();
@@ -288,13 +310,10 @@ module {
         encoding.certified := false;
         encoding.sha256 := hash;
 
-        if (asset.is_aliased == ?true) {
-            for (alias in get_key_aliases(self, formatted_key)) {
-                certify_asset(self, alias, asset);
-            };
-        };
+        asset.content_type := args.content_type;
+        asset.is_aliased := args.is_aliased;
 
-        certify_asset(self, formatted_key, asset);
+        certify_asset(self, formatted_key, asset, null);
 
         #ok();
     };
@@ -429,50 +448,100 @@ module {
         #ok();
     };
 
-    public func set_asset_content(self : StableStore, args : T.SetAssetContentArguments) : Result<(), Text> {
+    func hash_bytes(sha256 : Sha256.Digest, bytes : [Blob]) : async () {
+        for (content in bytes.vals()) {
+            sha256.writeBlob(content);
+        };
+    };
+
+    public let MAX_CHUNK_SIZE : Nat = 2_097_152;
+
+    // overwrites the content of an asset with the provided content
+    public func set_asset_content(self : StableStore, args : T.SetAssetContentArguments) : async* Result<(), Text> {
         let formatted_key = format_key(args.key);
         let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
-
-        let content_chunks = Vector.new<Blob>();
+        let encoding = Utils.map_get_or_put(asset.encodings, thash, args.content_encoding, new_encoding);
 
         var total_length = 0;
 
+        // extract chunks and place them into fixed sized chunks of MAX_CHUNK_SIZE in the content_chunks vector
+
         for (chunk_id in args.chunk_ids.vals()) {
-            let ?chunk = Map.remove(self.chunks, nhash, chunk_id) else return #err("Chunk with id " # debug_show chunk_id # " not found.");
-            Vector.add(content_chunks, chunk.content);
+            let ?chunk = Map.get(self.chunks, nhash, chunk_id) else return #err("Chunk with id " # debug_show chunk_id # " not found.");
             total_length += chunk.content.size();
         };
 
-        let hash = switch (args.sha256) {
-            case (?provided_hash) provided_hash;
-            case (_) {
-                let sha256 = Sha256.Digest(#sha256);
-                for (content in Vector.vals(content_chunks)) {
-                    sha256.writeBlob(content);
+        let bytes = Buffer.Buffer<Nat8>(MAX_CHUNK_SIZE * 3);
+        let content_chunks = Buffer.Buffer<Blob>(bytes.size() + MAX_CHUNK_SIZE - 1 / MAX_CHUNK_SIZE); // ceil division
+
+        for (chunk_id in args.chunk_ids.vals()) {
+            let ?chunk = Map.remove(self.chunks, nhash, chunk_id) else return #err("Chunk with id " # debug_show chunk_id # " not found.");
+
+            if (chunk.content.size() <= MAX_CHUNK_SIZE) {
+                content_chunks.add(chunk.content);
+            } else {
+                for (byte in Blob.toArray(chunk.content).vals()) {
+                    bytes.add(byte);
                 };
 
-                sha256.sum();
+                for (chunk in Itertools.chunks(bytes.vals(), MAX_CHUNK_SIZE)) {
+                    content_chunks.add(Blob.fromArray(chunk));
+                };
+
+                bytes.clear();
+
             };
+
         };
 
-        // do we need to check if the hash is correct?
+        // Debug.print("(chunk_ids, content_chunks, total_length): " # debug_show (args.chunk_ids.size(), content_chunks.size(), total_length));
 
-        let encoding = Utils.map_get_or_put(asset.encodings, thash, args.content_encoding, new_encoding);
+        let hash = do {
+            // need to make multiple async calls to hash the content
+            // to bypass the 40B instruction limit
+
+            // From the Sha256 benchmarks we know that hashing 1MB of data uses about 320M instructions
+            // So we can safely hash about 60MB of data before we hit the 40B instruction limit
+            // Assuming each chunk is less than 2MB (the suggested transfer limit for the IC), we can hash
+            // 60 in a single call
+
+            let sha256 = Sha256.Digest(#sha256);
+
+            for (chunked_contents in Itertools.chunks(content_chunks.vals(), 60)) {
+                await hash_bytes(sha256, chunked_contents);
+            };
+
+            sha256.sum();
+
+        };
+
+        // do we need to check if the hash is correct? - probably
+        switch (args.sha256) {
+            case (?provided_hash) if (hash != provided_hash) {
+                return #err("Provided hash does not match computed hash.");
+            };
+            case (_) {};
+        };
+
+        remove_asset_certificates(self, formatted_key, asset, ?args.content_encoding);
 
         encoding.modified := Time.now();
         encoding.total_length := total_length;
         encoding.sha256 := hash;
 
         Vector.clear(encoding.content_chunks);
-        Vector.addFromIter(encoding.content_chunks, Vector.vals(content_chunks));
+        Vector.addFromIter<Blob>(
+            encoding.content_chunks,
+            content_chunks.vals(),
+        );
 
-        if (asset.is_aliased == ?true) {
-            for (alias in get_key_aliases(self, formatted_key)) {
-                ignore certify_encoding(self, alias, asset, args.content_encoding);
-            };
-        };
+        // Debug.print("encoding content chunks: " # debug_show Vector.size(encoding.content_chunks));
+        let res = certify_asset(self, formatted_key, asset, ?args.content_encoding);
 
-        certify_encoding(self, formatted_key, asset, args.content_encoding);
+        Debug.print("certified endpoints: " # debug_show (Iter.toArray(CertifiedAssets.endpoints(self.certificate_store))));
+
+        #ok
+
     };
 
     public func unset_asset_content(self : StableStore, args : T.UnsetAssetContentArguments) : Result<(), Text> {
@@ -487,12 +556,17 @@ module {
     };
 
     public func delete_asset(self : StableStore, args : T.DeleteAssetArguments) : Result<(), Text> {
+        // Debug.print("deleting: " # debug_show args.key);
         let formatted_key = format_key(args.key);
+        // Debug.print("formatted_key: " # debug_show formatted_key);
         let ?asset = Map.remove(self.assets, thash, formatted_key) else return #err("Assets not found.");
+        // Debug.print("retrieved asset");
 
         for (encoding in Map.keys(asset.encodings)) {
             ignore remove_encoding_certificate(self, formatted_key, asset, encoding); // should automatically recertify fallback paths, if any is affected
         };
+
+        // Debug.print("removed encodings and certificates");
 
         #ok();
     };
@@ -510,7 +584,7 @@ module {
         let formatted_key = format_key(key);
         let ?asset = Map.get(self.assets, thash, formatted_key) else return #err("Assets not found.");
 
-        let encodings = Vector.new<T.AssetProperties>();
+        // let encodings = Vector.new<T.AssetProperties>();
 
         #ok({
             is_aliased = asset.is_aliased;
@@ -526,17 +600,15 @@ module {
 
         switch (args.is_aliased) {
             case (??is_aliased) {
-                if (asset.is_aliased == ?true and is_aliased == false){
-                    for (alias in get_key_aliases(self, formatted_key)) {
-                        for (encoding in Map.keys(asset.encodings)) {
-                            ignore remove_encoding_certificate(self, alias, asset, encoding);
-                        };
-                    };
+                if (asset.is_aliased == ?true and is_aliased == false) {
+                    remove_asset_certificates(self, formatted_key, asset, null); // add option to certify only aliases
+                } else if (asset.is_aliased == ?false and is_aliased == true) {
+                    certify_asset(self, formatted_key, asset, null); // add option to certify only aliases
                 };
-                
-                asset.is_aliased := ?is_aliased
+
+                asset.is_aliased := ?is_aliased;
             };
-            case(?null) asset.is_aliased := null;
+            case (?null) asset.is_aliased := null;
             case (_) {};
         };
 
@@ -679,17 +751,17 @@ module {
         #ok(chunk_id);
     };
 
-    public func execute_batch_operation(self : StableStore, operation : T.BatchOperationKind) : async Result<(), Text> {
+    public func execute_batch_operation(self : StableStore, operation : T.BatchOperationKind) : async* Result<(), Text> {
         let res : Result<(), Text> = switch (operation) {
             case (#Clear(args)) #ok(clear(self, args));
             case (#CreateAsset(args)) create_asset(self, args);
-            case (#SetAssetContent(args)) set_asset_content(self, args);
+            case (#SetAssetContent(args)) await* set_asset_content(self, args);
             case (#UnsetAssetContent(args)) unset_asset_content(self, args);
             case (#DeleteAsset(args)) delete_asset(self, args);
             case (#SetAssetProperties(args)) set_asset_properties(self, args);
         };
 
-        Debug.print(debug_show operation);
+        // Debug.print(debug_show operation);
 
         let #ok(_) = res else return Utils.send_error(res);
 
@@ -699,7 +771,7 @@ module {
     public func execute_batch_operations_sequentially(self : StableStore, operations : [T.BatchOperationKind]) : async* Result<(), Text> {
 
         for (operation in operations.vals()) {
-            let res = await execute_batch_operation(self, operation);
+            let res = await* execute_batch_operation(self, operation);
             let #ok(_) = res else return Utils.send_error(res);
         };
 
@@ -775,9 +847,10 @@ module {
 
         let ?batch = Map.get(self.batches, nhash, args.batch_id) else return #err("Batch not found.");
         let ?commit_batch_arguments = batch.commit_batch_arguments else return #err("Batch does not have proposed T.CommitBatchArguments");
-        batch.commit_batch_arguments := null;
 
         ignore (await* commit_batch(self, commit_batch_arguments));
+
+        batch.commit_batch_arguments := null;
 
         #ok();
     };
@@ -793,7 +866,7 @@ module {
             case (_) DEFAULT_MAX_COMPUTE_EVIDENCE_ITERATIONS;
         };
 
-        let _evidence_computation = switch (batch.evidence_computation) {
+        let _evidence_computation : T.EvidenceComputation = switch (batch.evidence_computation) {
             case (?evidence_computation) {
                 batch.evidence_computation := null;
                 evidence_computation;
@@ -801,7 +874,7 @@ module {
             case (_) {
                 #NextOperation {
                     operation_index = 0;
-                    hasher = do {
+                    hasher_state = do {
                         let digest = Sha256.Digest(#sha256);
                         digest.share();
                     };
@@ -908,13 +981,18 @@ module {
         headers;
     };
 
-    public func http_request_streaming_callback(self : StableStore, token_blob : T.StreamingToken) : Result<T.StreamingCallbackResponse, Text> {
-        let ?token : ?T.CustomStreamingToken = from_candid (token_blob) else return #err("Could not decode streaming token");
+    public func http_request_streaming_callback(self : StableStore, token : T.StreamingToken) : T.StreamingCallbackResponse {
 
-        let ?asset = Map.get(self.assets, thash, token.key) else return #err("Assets not found.");
-        let ?encoding = Map.get(asset.encodings, thash, token.content_encoding) else return #err("Encoding not found.");
+        Debug.print("Streaming token: " # debug_show token);
 
-        if (?encoding.sha256 != token.sha256) return #err("SHA256 hash mismatch");
+        let ?asset = Map.get(self.assets, thash, token.key) else Debug.trap("Assets not found.");
+        let ?encoding = Map.get(asset.encodings, thash, token.content_encoding) else Debug.trap("Encoding not found.");
+
+        if (?encoding.sha256 != token.sha256) Debug.trap("SHA256 hash mismatch");
+
+        let chunk : Blob = if (token.index < Vector.size(encoding.content_chunks)) Vector.get(encoding.content_chunks, token.index) else "";
+        // Debug.print("Content chunk: " # debug_show chunk.size());
+
         let next_token : T.CustomStreamingToken = {
             key = token.key;
             content_encoding = token.content_encoding;
@@ -922,16 +1000,15 @@ module {
             sha256 = ?encoding.sha256;
         };
 
+        // Debug.print("Next token: " # debug_show next_token);
+        let content_chunks_size = Vector.size(encoding.content_chunks);
+
         let response : T.StreamingCallbackResponse = {
-            body = Vector.get(encoding.content_chunks, token.index);
-            token = if (token.index < Vector.size(encoding.content_chunks)) ?to_candid (next_token) else (null);
+            body = chunk;
+            token = if (next_token.index < content_chunks_size) ?(next_token) else (null);
         };
 
-        #ok(response);
-
-    };
-
-    func create_streaming_token() {
+        (response);
 
     };
 
@@ -947,74 +1024,106 @@ module {
     ) : T.HttpResponse {
 
         let headers = build_headers(asset, encoding_name);
-        let next_token = if (chunk_index < Vector.size(encoding.content_chunks)) {
-            ?{
-                key;
-                content_encoding = encoding_name;
-                index = chunk_index + 1;
-                sha256 = ?encoding.sha256;
-            };
-        } else (null);
+        let next_token : T.StreamingToken = {
+            key;
+            content_encoding = encoding_name;
+            index = chunk_index + 1;
+            sha256 = ?encoding.sha256;
+        };
 
-        let ?callback = self.streaming_callback else return Debug.trap("Streaming callback not set");
-        let streaming_strategy : HttpTypes.StreamingStrategy = #Callback({
-            token = to_candid (next_token);
+        let ?callback : ?T.StreamingCallback = self.streaming_callback else return Debug.trap("Streaming callback not set");
+        let streaming_strategy : T.StreamingStrategy = #Callback({
+            token = (next_token);
             callback;
         });
+
+        // Debug.print("next token: " # debug_show (next_token));
 
         let contains_hash = Option.isSome(
             Array.find(
                 etags,
                 func(etag : Text) : Bool {
-                    let #ok(etag_bytes) = Hex.decode(etag) else return false;
+                    let unwrapped_etag = Text.replace(etag, #text("\""), "");
+
+                    let #ok(etag_bytes) = Hex.decode(unwrapped_etag) else return false;
                     Blob.fromArray(etag_bytes) == encoding.sha256;
                 },
             )
         );
 
-        let (status_code, body) : (Nat16, Blob) = if (contains_hash) {
-            // (304, "");
-            (200, Vector.get(encoding.content_chunks, chunk_index));
-        } else {
-            if (Map.has(headers, thash, "etag")) {
-                ignore Map.put(headers, thash, "etag", Hex.encode(Blob.toArray(encoding.sha256)));
-            };
+        // Debug.print("encoding chunks: " # debug_show Vector.size(encoding.content_chunks));
 
-            (200, Vector.get(encoding.content_chunks, chunk_index));
+        let content_chunk = Vector.get(encoding.content_chunks, chunk_index);
+
+        // Debug.print("content (index, bytes): " # debug_show (chunk_index, content_chunk.size()));
+        assert content_chunk.size() <= 2 * (1024 ** 2);
+
+        // Debug.print("contains_hash: " # debug_show contains_hash);
+
+        let (status_code, body, opt_body_hash) : (Nat16, Blob, ?Blob) = if (contains_hash) {
+            (304, "", null);
+            // (200, content_chunk);
+        } else {
+
+            let hex = Hex.encode(Blob.toArray(encoding.sha256));
+            let etag_value = "\"" # hex # "\"";
+            ignore Map.put(headers, thash, "etag", etag_value);
+
+            (200, content_chunk, ?encoding.sha256);
         };
 
-        let http_res : T.HttpResponse = {
+        let headers_buffer = Buffer.Buffer<(Text, Text)>(Map.size(headers));
+        for ((key, value) in Map.entries(headers)) {
+            headers_buffer.add((key, value));
+        };
+
+        let http_res = {
             status_code;
-            headers = Iter.toArray(Map.entries(headers));
+            headers = Buffer.toArray(headers_buffer);
             body;
             upgrade = null;
-            streaming_strategy = if (Vector.size(encoding.content_chunks) > 1) ?streaming_strategy else null;
+            streaming_strategy = null;
         };
+
+        // Debug.print("http_res: " # debug_show { http_res with body = "" });
 
         // Debug.print(debug_show { http_req; http_res = { http_res with streaming_strategy = null } });
-        let certified_assets_response = CertifiedAssets.get_certified_response(self.certificate_store, http_req, http_res, ?encoding.sha256);
+        let certified_headers_result = CertifiedAssets.get_certificate(self.certificate_store, http_req, http_res, opt_body_hash);
 
-        let certified_response = switch (certified_assets_response) {
-            case (#ok(certified_response)) certified_response;
-            case (#err(err_msg)) Debug.trap("CertifiedAssets.get_certified_response failed: " # err_msg);
+        switch (certified_headers_result) {
+            case (#ok(certified_headers)) {
+
+                for ((key, value) in certified_headers.vals()) {
+                    headers_buffer.add((key, value));
+                };
+
+                let certified_res : T.HttpResponse = {
+                    status_code;
+                    headers = Buffer.toArray(headers_buffer);
+                    body;
+                    upgrade = null;
+                    streaming_strategy = if (Vector.size(encoding.content_chunks) > 1) ?streaming_strategy else null;
+                };
+
+                return certified_res;
+            };
+            case (#err(err_msg)) return Debug.trap("CertifiedAssets.get_certificate failed: " # err_msg);
         };
-
-        return certified_response;
 
     };
 
-    func get_asset(self: StableStore, key: Text) : ?Assets {
-        switch(Map.get(self.assets, thash, key)) {
+    func get_asset(self : StableStore, key : Text) : ?Assets {
+        switch (Map.get(self.assets, thash, key)) {
             case (?asset) return ?asset;
             case (_) {};
         };
 
-        let reverse_alias = switch(get_key_from_aliase(self, key)) {
+        let reverse_alias = switch (get_key_from_aliase(self, key)) {
             case (?key) key;
             case (_) return null;
         };
 
-        switch(Map.get(self.assets, thash, reverse_alias)) {
+        switch (Map.get(self.assets, thash, reverse_alias)) {
             case (?asset) {
                 if (asset.is_aliased != ?true) return null;
                 return ?asset;
@@ -1058,17 +1167,29 @@ module {
             };
         };
 
+        let etag_value = Array.find(
+            req.headers,
+            func(header : (Text, Text)) : Bool {
+                header.0 == "if-none-match";
+            },
+        );
+
+        let etag_values = switch (etag_value) {
+            case (?(field, val)) [val];
+            case (_) [];
+        };
+
         let ordered_encodings = encoding_order(encodings);
         label loop_1 for (encoding_name in ordered_encodings.vals()) {
             let ?encoding = Map.get(asset.encodings, thash, encoding_name) else continue loop_1;
 
             if (cert_version == 1 and encoding_name != ordered_encodings[0]) break loop_1;
 
-            let headers = build_headers(asset, encoding_name);
+            // let headers = build_headers(asset, encoding_name);
             let sha256 = encoding.sha256;
-            let sha256_hex = Hex.encode(Blob.toArray(sha256));
+            // let sha256_hex = Hex.encode(Blob.toArray(sha256));
 
-            let res = build_ok_response(self, path, asset, encoding_name, encoding, 0, [sha256_hex], req);
+            let res = build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req);
             return res;
             // switch (res) {
             //     case (#ok(res)) return #ok(res);
@@ -1087,9 +1208,9 @@ module {
 
         label loop_2 for (encoding_name in ENCODING_CERTIFICATION_ORDER.vals()) {
             let ?encoding = Map.get(asset.encodings, thash, encoding_name) else continue loop_2;
-            let sha256_hex = Hex.encode(Blob.toArray(encoding.sha256));
-            let headers = build_headers(asset, encoding_name);
-            let res = build_ok_response(self, path, asset, encoding_name, encoding, 0, [sha256_hex], req);
+            // let sha256_hex = Hex.encode(Blob.toArray(encoding.sha256));
+            // let headers = build_headers(asset, encoding_name);
+            let res = build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req);
             return res;
             // switch (res) {
             //     case (#ok(res)) return res;
