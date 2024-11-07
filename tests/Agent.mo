@@ -5,7 +5,7 @@ import None "mo:base/None";
 import Time "mo:base/Time";
 import { test; suite } "mo:test/async";
 
-import BaseAsset "../src/BaseAsset";
+import BaseAssets "../src/BaseAssets";
 import Assets "../src";
 import Migrations "../src/Migrations";
 
@@ -15,7 +15,7 @@ import Canister "../src/Canister";
 // let owner = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 let caller = Principal.fromText("tde7l-3qaaa-aaaah-qansa-cai");
 
-let asset = await Canister.AssetsCanister(null);
+let asset = await Canister.AssetsCanister(#Init({}));
 await asset.init();
 let authorized = await asset.list_authorized();
 let owner = authorized[0];
@@ -25,7 +25,7 @@ Debug.print("actor principal: " # debug_show Principal.fromActor(asset));
 Debug.print(debug_show (Time.now()));
 
 await suite(
-    "BaseAsset Service Test",
+    "BaseAssets Service Test",
     func() : async () {
         await test(
             "permissions",
@@ -83,7 +83,7 @@ await suite(
         // await test(
         //     "store and retrieve asset",
         //     func() : async () {
-        //         let store_args : BaseAsset.StoreArgs = {
+        //         let store_args : BaseAssets.StoreArgs = {
         //             key = "/hello";
         //             content = "Hello, World!";
         //             sha256 = null;

@@ -76,6 +76,8 @@ module {
 
     public type StableStore = T.StableStoreV0;
 
+    public let MAX_CHUNK_SIZE = AssetUtils.MAX_CHUNK_SIZE;
+
     public func init_stable_store(owner : Principal) : StableStore {
         let state : StableStore = {
             var canister_id = null;
@@ -93,11 +95,13 @@ module {
             var next_chunk_id = 1;
 
             batches = Map.new();
+            copy_on_write_batches = Map.new();
             var next_batch_id = 1;
 
             commit_principals = Set.new();
             prepare_principals = Set.new();
             manage_permissions_principals = Set.new();
+
         };
 
         AssetUtils.grant_permission(state, owner, #Commit);
@@ -121,9 +125,12 @@ module {
         self.canister_id;
     };
 
-    public func http_request_streaming_callback(self : StableStore, token_blob : T.StreamingToken) : T.StreamingCallbackResponse {
-        let res = AssetUtils.http_request_streaming_callback(self, token_blob);
-        // let streaming_response = Utils.extract_result(res);
+    public func exists(self : StableStore, key : T.Key) : Bool {
+        AssetUtils.exists(self, key);
+    };
+
+    public func http_request_streaming_callback(self : StableStore, token : T.StreamingToken) : T.StreamingCallbackResponse {
+        AssetUtils.http_request_streaming_callback(self, token);
     };
 
     public func from_version(versions : T.VersionedStableStore) : StableStore {
@@ -137,162 +144,219 @@ module {
 
     public func api_version() : Nat16 = 1;
 
-    public func certified_tree(self : StableStore) : T.CertifiedTree {
-        let result = CertifiedAssets.get_certified_tree(self.certificate_store, null);
-        Utils.extract_result(result);
+    public func certified_tree(self : StableStore) : Result<T.CertifiedTree, Text> {
+        CertifiedAssets.get_certified_tree(self.certificate_store, null);
     };
 
-    public func retrieve(self : StableStore, caller : Principal, key : T.Key) : Blob {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        Utils.extract_result(AssetUtils.retrieve(self, key));
+    public func get(self : StableStore, args : T.GetArgs) : Result<T.EncodedAsset, Text> {
+        AssetUtils.get(self, args);
     };
 
-    public func get(self : StableStore, args : T.GetArgs) : T.EncodedAsset {
-        Utils.extract_result(AssetUtils.get(self, args));
-    };
-
-    public func get_chunk(self : StableStore, args : T.GetChunkArgs) : T.ChunkContent {
-        Utils.extract_result(AssetUtils.get_chunk(self, args));
+    public func get_chunk(self : StableStore, args : T.GetChunkArgs) : Result<T.ChunkContent, Text> {
+        AssetUtils.get_chunk(self, args);
     };
 
     public func list(self : StableStore, args : {}) : [T.AssetDetails] {
         AssetUtils.list(self, args);
     };
 
-    public func store(self : StableStore, caller : Principal, args : StoreArgs) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.store(self, args));
+    public func store(self : StableStore, caller : Principal, args : StoreArgs) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) AssetUtils.store(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func create_asset(self : StableStore, caller : Principal, args : CreateAssetArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.create_asset(self, args));
+    public func create_asset(self : StableStore, caller : Principal, args : CreateAssetArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) AssetUtils.create_asset(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func set_asset_content(self : StableStore, caller : Principal, args : SetAssetContentArguments) : async* () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(await* AssetUtils.set_asset_content(self, args));
+    public func set_asset_content(self : StableStore, caller : Principal, args : SetAssetContentArguments) : async* Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) await* AssetUtils.set_asset_content(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func unset_asset_content(self : StableStore, caller : Principal, args : T.UnsetAssetContentArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.unset_asset_content(self, args));
+    public func unset_asset_content(self : StableStore, caller : Principal, args : T.UnsetAssetContentArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) AssetUtils.unset_asset_content(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func delete_asset(self : StableStore, caller : Principal, args : DeleteAssetArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.delete_asset(self, args));
+    public func delete_asset(self : StableStore, caller : Principal, args : DeleteAssetArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) AssetUtils.delete_asset(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func get_asset_properties(self : StableStore, caller : Principal, key : T.Key) : T.AssetProperties {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        Utils.extract_result(AssetUtils.get_asset_properties(self, key));
+    public func get_asset_properties(self : StableStore, key : T.Key) : Result<T.AssetProperties, Text> {
+        AssetUtils.get_asset_properties(self, key);
     };
 
-    public func set_asset_properties(self : StableStore, caller : Principal, args : SetAssetPropertiesArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(AssetUtils.set_asset_properties(self, args));
+    public func set_asset_properties(self : StableStore, caller : Principal, args : SetAssetPropertiesArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) AssetUtils.set_asset_properties(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func clear(self : StableStore, caller : Principal, args : ClearArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        AssetUtils.clear(self, args);
+    public func clear(self : StableStore, caller : Principal, args : ClearArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) #ok(AssetUtils.clear(self, args));
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func create_batch(self : StableStore, caller : Principal, args : {}) : (T.CreateBatchResponse) {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        Utils.extract_result(AssetUtils.create_batch(self, Time.now()));
+    public func create_batch(self : StableStore, caller : Principal, args : {}) : Result<(T.CreateBatchResponse), Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) AssetUtils.create_batch(self);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func create_chunk(self : StableStore, caller : Principal, args : T.CreateChunkArguments) : (T.CreateChunkResponse) {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        let chunk_id = Utils.extract_result(AssetUtils.create_chunk(self, args));
-        { chunk_id };
+    public func create_chunk(self : StableStore, caller : Principal, args : T.CreateChunkArguments) : async* Result<(T.CreateChunkResponse), Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) await AssetUtils.create_chunk(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func commit_batch(self : StableStore, caller : Principal, args : CommitBatchArguments) : async* () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(await* AssetUtils.commit_batch(self, args));
+    public func create_chunks(self : StableStore, caller : Principal, args : T.CreateChunksArguments) : async* Result<T.CreateChunksResponse, Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) await* AssetUtils.create_chunks(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func propose_commit_batch(self : StableStore, caller : Principal, args : CommitBatchArguments) : () {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        Utils.extract_result(AssetUtils.propose_commit_batch(self, args));
+    public func commit_batch(self : StableStore, caller : Principal, args : CommitBatchArguments) : async* Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) await* AssetUtils.commit_batch(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func commit_proposed_batch(self : StableStore, caller : Principal, args : CommitProposedBatchArguments) : async* () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
-        Utils.extract_result(await* AssetUtils.commit_proposed_batch(self, args));
+    public func propose_commit_batch(self : StableStore, caller : Principal, args : CommitBatchArguments) : Result<(), Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) AssetUtils.propose_commit_batch(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func compute_evidence(self : StableStore, caller : Principal, args : ComputeEvidenceArguments) : (?Blob) {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        ?"";
+    public func commit_proposed_batch(self : StableStore, caller : Principal, args : CommitProposedBatchArguments) : async* Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) await* AssetUtils.commit_proposed_batch(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func delete_batch(self : StableStore, caller : Principal, args : DeleteBatchArguments) : () {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
-        Utils.extract_result(AssetUtils.delete_batch(self, args));
+    public func compute_evidence(self : StableStore, caller : Principal, args : ComputeEvidenceArguments) : async* Result<(?Blob), Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) await* AssetUtils.compute_evidence(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func authorize(self : StableStore, caller : Principal, principal : Principal) : async* () {
-        Utils.assert_result(await* AssetUtils.is_manager_or_controller(self, caller));
-
-        AssetUtils.grant_permission(self, principal, #Commit);
+    public func delete_batch(self : StableStore, caller : Principal, args : DeleteBatchArguments) : Result<(), Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) AssetUtils.delete_batch(self, args);
+            case (#err(msg)) #err(msg);
+        };
     };
 
-    public func deauthorize(self : StableStore, caller : Principal, principal : Principal) : async* () {
+    public func authorize(self : StableStore, caller : Principal, principal : Principal) : async* Result<(), Text> {
+        switch (await* AssetUtils.is_manager_or_controller(self, caller)) {
+            case (#ok(_)) AssetUtils.grant_permission(self, principal, #Commit);
+            case (#err(msg)) return #err(msg);
+        };
+
+        #ok
+
+    };
+
+    public func deauthorize(self : StableStore, caller : Principal, principal : Principal) : async* Result<(), Text> {
+
         var has_permission = if (principal == caller) {
             AssetUtils.has_permission(self, principal, #Commit);
         } else false;
 
         if (not has_permission) {
-            Utils.assert_result(await* AssetUtils.is_controller(self, caller));
+            switch (await* AssetUtils.is_controller(self, caller)) {
+                case (#ok(_)) {};
+                case (#err(msg)) return #err(msg);
+            };
         };
 
         AssetUtils.revoke_permission(self, principal, #Commit);
+
+        #ok();
     };
 
     public func list_authorized(self : StableStore) : [Principal] {
         AssetUtils.get_permission_list(self, #Commit);
     };
 
-    public func grant_permission(self : StableStore, caller : Principal, args : T.GrantPermission) : async* () {
-        Utils.assert_result(await* AssetUtils.is_manager_or_controller(self, caller));
+    public func grant_permission(self : StableStore, caller : Principal, args : T.GrantPermission) : async* Result<(), Text> {
+        switch (await* AssetUtils.is_manager_or_controller(self, caller)) {
+            case (#ok(_)) AssetUtils.grant_permission(self, args.to_principal, args.permission);
+            case (#err(msg)) return #err(msg);
+        };
 
-        AssetUtils.grant_permission(self, args.to_principal, args.permission);
+        #ok;
     };
 
-    public func revoke_permission(self : StableStore, caller : Principal, args : RevokePermission) : async* () {
+    public func revoke_permission(self : StableStore, caller : Principal, args : RevokePermission) : async* Result<(), Text> {
         var has_permission = if (args.of_principal == caller) {
-            AssetUtils.has_permission(self, args.of_principal, args.permission);
+            if (not AssetUtils.has_permission(self, args.of_principal, args.permission)) {
+                return #ok();
+            };
+
+            true;
         } else {
             AssetUtils.has_permission(self, caller, #ManagePermissions);
         };
 
         if (not has_permission) {
-            Utils.assert_result(await* AssetUtils.is_controller(self, caller));
+            switch (await* AssetUtils.is_controller(self, caller)) {
+                case (#ok(_)) {};
+                case (#err(msg)) return #err(msg);
+            };
         };
 
         AssetUtils.revoke_permission(self, args.of_principal, args.permission);
+
+        #ok();
     };
 
     public func list_permitted(self : StableStore, { permission } : ListPermitted) : [Principal] {
         AssetUtils.get_permission_list(self, permission);
     };
 
-    public func take_ownership(self : StableStore, caller : Principal) : async* () {
-        Utils.assert_result(await* AssetUtils.is_controller(self, caller));
+    public func take_ownership(self : StableStore, caller : Principal) : async* Result<(), Text> {
+        switch (await* AssetUtils.is_controller(self, caller)) {
+            case (#ok(_)) {};
+            case (#err(msg)) return #err(msg);
+        };
 
         Set.clear(self.commit_principals);
         Set.clear(self.prepare_principals);
         Set.clear(self.manage_permissions_principals);
 
         ignore Set.put(self.commit_principals, phash, caller);
+
+        #ok;
     };
 
-    public func get_configuration(self : StableStore, caller : Principal) : T.ConfigurationResponse {
-        Utils.assert_result(AssetUtils.can_prepare(self, caller));
+    public func get_configuration(self : StableStore, caller : Principal) : Result<T.ConfigurationResponse, Text> {
+        switch (AssetUtils.can_prepare(self, caller)) {
+            case (#ok(_)) {};
+            case (#err(msg)) return #err(msg);
+        };
 
         let config : T.ConfigurationResponse = {
             max_batches = self.configuration.max_batches;
@@ -300,11 +364,14 @@ module {
             max_bytes = self.configuration.max_bytes;
         };
 
-        config;
+        #ok(config);
     };
 
-    public func configure(self : StableStore, caller : Principal, args : T.ConfigureArguments) : () {
-        Utils.assert_result(AssetUtils.can_commit(self, caller));
+    public func configure(self : StableStore, caller : Principal, args : T.ConfigureArguments) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) {};
+            case (#err(msg)) return #err(msg);
+        };
 
         switch (args.max_batches) {
             case (null) {};
@@ -326,6 +393,8 @@ module {
                 self.configuration.max_bytes := max_bytes;
             };
         };
+
+        #ok();
     };
 
     public func validate_grant_permission(self : StableStore, args : GrantPermission) : Result<Text, Text> {
@@ -350,7 +419,7 @@ module {
         #ok("configure: " # debug_show args);
     };
 
-    public func http_request(self : StableStore, req : T.HttpRequest) : T.HttpResponse {
+    public func http_request(self : StableStore, req : T.HttpRequest) : Result<T.HttpResponse, Text> {
         let headers = HttpParser.Headers(req.headers);
         let content_encoding = switch (headers.get("content-encoding")) {
             case (?encoding) { encoding };
@@ -358,6 +427,8 @@ module {
         };
 
         let url = HttpParser.URL(req.url, headers);
+
         AssetUtils.build_http_response(self, req, url, content_encoding);
+
     };
 };

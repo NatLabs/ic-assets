@@ -4,6 +4,8 @@ import Order "mo:base/Order";
 import Iter "mo:base/Iter";
 import Blob "mo:base/Blob";
 import Prelude "mo:base/Prelude";
+import Array "mo:base/Array";
+import Buffer "mo:base/Buffer";
 
 import Map "mo:map/Map";
 
@@ -15,8 +17,8 @@ module {
     type Result<T, E> = Result.Result<T, E>;
     type Order = Order.Order;
 
-    public func map_get_or_put<K, V>(map: Map<K, V>, hash_util: Map.HashUtils<K>, key: K, default: () ->V): V {
-        switch(Map.get(map, hash_util, key)) {
+    public func map_get_or_put<K, V>(map : Map<K, V>, hash_util : Map.HashUtils<K>, key : K, default : () -> V) : V {
+        switch (Map.get(map, hash_util, key)) {
             case (?encoding) encoding;
             case (_) {
                 let val = default();
@@ -26,46 +28,50 @@ module {
         };
     };
 
-    public func assert_result<A>(result: Result<A, Text>){
-        switch(result){
+    public func assert_result<A>(result : Result<A, Text>) {
+        switch (result) {
             case (#ok(_)) return;
             case (#err(errMsg)) Debug.trap(errMsg);
-        }
+        };
     };
 
-    public func extract_result<A>(result: Result<A, Text>): A {
-        switch(result){
+    public func extract_result<A>(result : Result<A, Text>) : A {
+        switch (result) {
             case (#ok(a)) return a;
             case (#err(errMsg)) Debug.trap(errMsg);
-        }
+        };
     };
 
-    public func send_error<A, B>(result: Result<A, Text>): Result<B, Text> {
-        switch(result){
+    public func send_error<A, B>(result : Result<A, Text>) : Result<B, Text> {
+        switch (result) {
             case (#ok(a)) Prelude.unreachable();
             case (#err(errMsg)) #err(errMsg);
-        }
+        };
     };
 
-    public func reverse_order<A>(fn: (A, A) -> Order): (A, A) -> Order {
-        func (a: A, b: A) : Order {
-            switch(fn(a, b)){
+    public func reverse_order<A>(fn : (A, A) -> Order) : (A, A) -> Order {
+        func(a : A, b : A) : Order {
+            switch (fn(a, b)) {
                 case (#less) return #greater;
                 case (#greater) return #less;
                 case (#equal) return #equal;
-            }
-        }
+            };
+        };
     };
 
-    public func blob_concat(blobs: [Blob]): Blob {
+    public func blob_concat(blobs : [Blob]) : Blob {
         let bytes : Iter<Nat8> = Itertools.flatten(
             Iter.map(
                 blobs.vals(),
-                func (blob: Blob): Iter<Nat8> = blob.vals()
+                func(blob : Blob) : Iter<Nat8> = blob.vals(),
             )
         );
 
-
-        Blob.fromArray(Iter.toArray(bytes))
+        Blob.fromArray(Iter.toArray(bytes));
     };
-}
+
+    public func append_to_buffer<A>(buffer : Buffer.Buffer<A>, items : Iter.Iter<A>) {
+        for (item in items) { buffer.add(item) };
+    };
+
+};

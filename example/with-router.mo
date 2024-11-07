@@ -26,8 +26,8 @@ shared ({ caller = owner }) actor class () = this_canister {
     assets_sstore := Assets.migrate(assets_sstore);
     let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
-        assets.http_request_streaming_callback(token_blob);
+    public query func http_request_streaming_callback(token : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
+        assets.http_request_streaming_callback(token);
     };
 
     // Acts as the initialization function for the canister.

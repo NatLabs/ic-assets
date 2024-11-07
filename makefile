@@ -23,7 +23,13 @@ bench: set-dfx-moc-path
 	mops bench
 
 actor-test:
-	dfx deploy asset-test2
+	dfx deploy asset-test
 	dfx ledger fabricate-cycles --canister asset-test
-	dfx ledger fabricate-cycles --canister asset-test2
-	dfx canister call asset-test2 run_tests
+
+	# Add the asset-test canister as a controller of itself
+	dfx canister update-settings asset-test --add-controller $$(dfx canister id asset-test) 
+
+	# Run the tests
+	dfx canister call asset-test run_query_tests
+	dfx canister call asset-test run_tests
+	dfx canister call asset-test get_test_details

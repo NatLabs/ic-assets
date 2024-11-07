@@ -1,4 +1,5 @@
 import Debug "mo:base/Debug";
+import Map "mo:map/Map";
 import T "Types";
 
 module {
@@ -26,8 +27,9 @@ module {
             var streaming_callback = null;
             assets = test_version.assets;
             certificate_store = test_version.certificate_store;
-            chunks = test_version.chunks;
+            chunks = Map.new();
             batches = test_version.batches;
+            copy_on_write_batches = Map.new();
 
             commit_principals = test_version.commit_principals;
             prepare_principals = test_version.prepare_principals;
@@ -41,6 +43,8 @@ module {
                 var max_chunks = null;
                 var max_bytes = null;
             };
+
+            var fallback_page = "";
         };
     };
 };

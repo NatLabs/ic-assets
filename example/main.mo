@@ -19,6 +19,8 @@ import Itertools "mo:itertools/Iter";
 // import Web "mo:web-io";
 
 import Assets "../src";
+import { get_404_page } "404Page";
+import { homepage } "Homepage";
 
 shared ({ caller = owner }) actor class () = this_canister {
 
@@ -32,15 +34,14 @@ shared ({ caller = owner }) actor class () = this_canister {
     let { nhash; thash } = Map;
 
     type Map<K, V> = Map.Map<K, V>;
-    let raw_uploads : Map<Nat, Map<Nat, Blob>> = Map.new();
     let current_uploads : Map<Nat, Map<Text, File>> = Map.new();
 
     stable var assets_sstore = Assets.init_stable_store(owner);
     assets_sstore := Assets.migrate(assets_sstore);
     let assets = Assets.Assets(assets_sstore);
 
-    public query func http_request_streaming_callback(token_blob : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
-        assets.http_request_streaming_callback(token_blob);
+    public query func http_request_streaming_callback(token : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
+        assets.http_request_streaming_callback(token);
     };
 
     // Acts as the initialization function for the canister.
@@ -50,30 +51,25 @@ shared ({ caller = owner }) actor class () = this_canister {
         assets.set_canister_id(id);
         assets.set_streaming_callback(http_request_streaming_callback);
 
-        assert assets.get_streaming_callback() == ?http_request_streaming_callback;
+        await* certify_404_page();
         await* update_homepage();
+        Debug.print("Re-Certified 404 page and updated homepage");
     };
 
     func create_batch() : (Assets.BatchId) {
-        let { batch_id } = assets.create_batch(owner, {});
+        let #ok({ batch_id }) = assets.create_batch(owner, {});
         let new_batch = Map.new<Text, File>();
         ignore Map.put(current_uploads, nhash, batch_id, new_batch);
         batch_id;
     };
 
     func upload_chunks(batch_id : Assets.BatchId, chunks : [Blob]) : [Assets.ChunkId] {
-        // let async_chunks = Buffer.Buffer<async Assets.CreateChunkResponse>(8);
         let chunk_ids = Buffer.Buffer<Assets.ChunkId>(8);
 
         for (chunk in chunks.vals()) {
-            let { chunk_id } = assets.create_chunk(owner, { batch_id = batch_id; content = chunk });
+            let #ok({ chunk_id }) = assets.create_chunk(owner, { batch_id = batch_id; content = chunk });
             chunk_ids.add(chunk_id);
         };
-
-        // for (async_chunk in async_chunks.vals()) {
-        //     let { chunk_id } = await async_chunk;
-        //     chunk_ids.add(chunk_id);
-        // };
 
         return Buffer.toArray(chunk_ids);
     };
@@ -130,166 +126,16 @@ shared ({ caller = owner }) actor class () = this_canister {
         // Debug.print("Committing batch: " # debug_show batch_id);
         // Debug.print("Operations: " # debug_show Buffer.toArray(operations));
 
-        await* assets.commit_batch(
-            owner,
-            {
-                batch_id;
-                operations = Buffer.toArray(operations);
-            },
+        ignore (
+            await* assets.commit_batch(
+                owner,
+                {
+                    batch_id;
+                    operations = Buffer.toArray(operations);
+                },
+            )
         );
 
-    };
-
-    func homepage(files : [Assets.AssetDetails]) : Text {
-        let files_list = Array.map(
-            files,
-            func(file : Assets.AssetDetails) : Text {
-                let encoding = file.encodings[0];
-                // Debug.print("homepage: " # debug_show (file.key, HttpParser.decodeURIComponent(HttpParser.encodeURI(file.key))));
-
-                "<li style=\"display:\"flex\"; flex-direction:\"row\" align-items: \"space-between\"; width=\"1vw\" \">
-                    <a href=\"" # HttpParser.encodeURI(file.key) # "\">" # file.key # "</a>
-                    <span> - [" # file.content_type # "]      </span>
-                    <span> -  <b>" # debug_show (encoding.length) # "</b> Bytes      </span>
-                    <button>Delete</button>
-                </li>";
-            },
-        );
-
-        "
-            <!DOCTYPE html>
-            <html lang=\"en\">
-            <head>
-                <meta charset=\"UTF-8\">
-                <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-                <title>Assets Canister Example</title>
-            </head>
-            <body>
-                <h1>Assets Canister Example</h1>
-
-                <input type=\"file\" class=\"file-input\" multiple>
-                <input type=\"text\" class=\"file-name-input\" placeholder=\"add files to directory\">
-                <button class=\"upload-button\">Upload</button>
-
-                <h2>Files</h2>
-                <ul class=\"item-list\">
-                    " # Text.join("\n", files_list.vals()) # "
-                </ul>
-
-                <script>
-                    document.querySelector('.upload-button').addEventListener('click', uploadFiles);
-
-                    const MAX_CHUNK_SIZE = 1_887_436; // should be 2mb but is 1.8mb to account for the other data in the request like method and headers
-
-                    async function uploadFiles() {
-                        const fileInput = document.querySelector('.file-input');
-                        const file_name_input = document.querySelector('.file-name-input');
-                        const files = fileInput.files;
-                        let prefix = file_name_input.value;
-
-                        if (files.length > 0) {
-
-                            const convert_to_bytes = async (formData) => {
-                                return new Promise((resolve, reject) => {
-                                    const reader = new FileReader();
-                                    reader.readAsArrayBuffer(formData);
-                                    reader.onloadend = () => {
-                                        const array_buffer = reader.result;
-                                        const byte_array = new Uint8Array(array_buffer);
-                                        resolve(byte_array);
-                                    };
-                                });
-                            };
-
-                            const upload_chunks = async (batch_id, filename, content_type, chunks, start_id = 0) => {
-                                return new Promise(async (resolve, reject) => {
-                                    if (start_id >= chunks.length) return resolve();
-                                    let chunk_requests = [];
-                                    for (let chunk_id = start_id; chunk_id < chunks.length; chunk_id += 1) {
-                                        let req = fetch(`/upload/${batch_id}/${chunk_id}?content-type=${content_type}&filename=${filename}&total_chunks=${chunks.length}`, {
-                                            method: 'PUT',
-                                            body: chunks[chunk_id]
-                                        });
-
-                                        chunk_requests.push(req);
-                                    }
-
-                                    Promise.all(chunk_requests)
-                                        .then(() => resolve());
-                                });
-                            };
-
-                            let batch_id = await fetch(`/upload`, { // should add number of files
-                                method: 'POST',
-                            })
-                            .then((response) => response.text())
-                            .then((text) => new Number(text));
-                            console.log({ batch_id })
-
-                            let prefixed_file_names = []
-                            for (let i = 0; i < files.length; i++) {
-                                const file = files[i];
-                                let prefixedFileName = file.name;
-                                prefix = '/' + prefix.split('/').filter((t) => t !== '').join('/')
-                                if (prefix !== \"\") prefixedFileName= `${prefix}/${file.name}`;
-
-                                console.log({prefixedFileName, prefix, filename: file.name})
-
-                                const prefixedFile = new File([file], prefixedFileName, { type: file.type });
-                                prefixed_file_names.push(prefixedFileName);
-
-                                const file_bytes = await convert_to_bytes(prefixedFile);
-
-                                const file_bytes_chunks = [];
-                                for (let i = 0; i < file_bytes.length; i += MAX_CHUNK_SIZE) {
-                                    file_bytes_chunks.push(file_bytes.slice(i, i + MAX_CHUNK_SIZE));
-                                }
-
-                                await upload_chunks(batch_id, prefixedFileName, file.type, file_bytes_chunks);
-                            }
-
-                            for (prefixed_file_name of prefixed_file_names) {
-                                console.log(\"about to commit \", prefixed_file_name);
-                                await fetch(`/upload/commit/${batch_id}?filename=${prefixed_file_name}`, {
-                                    method: 'POST',
-                                })
-                                .catch(response => alert('Error:', response));
-                            }
-
-                            window.location.reload()
-
-                        } else {
-                            alert('Please select a file or directory to upload.');
-                        }
-                    }
-
-                    function deleteFile(filename){
-                        fetch(`/upload?filename=${filename}`, {
-                            method: 'DELETE',
-                        })
-                        .then(response => response.text())
-                        .then(data => {
-                            console.log('Success:', data);
-                            window.location.reload()
-                        })
-                        .catch(response => {
-                            console.response('Error:', response);
-                        });
-                    }
-
-                    for (const list_item of document.querySelectorAll('li')) {
-                        let key = list_item.querySelector('a').textContent;
-                        let button = list_item.querySelector('button');
-
-                        button.addEventListener('click', () => {
-                            console.log(\"about to delete \", key);
-                            deleteFile(key);
-                        })
-                    }
-                </script>
-            </body>
-            </html>
-        ";
     };
 
     func update_homepage() : async* () {
@@ -301,10 +147,15 @@ shared ({ caller = owner }) actor class () = this_canister {
         await* commit_batch(batch_id);
     };
 
+    func certify_404_page() : async* () {
+        let _404_page = get_404_page();
+
+        let batch_id = create_batch();
+        await* upload(batch_id, "/404.html", "text/html", [Text.encodeUtf8(_404_page)]);
+        await* commit_batch(batch_id);
+    };
+
     public composite query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
-        assert ?_canister_id() == assets.get_canister_id();
-        assert assets.get_streaming_callback() == ?http_request_streaming_callback;
-        // Debug.print("request before parsing: " # debug_show { request with body = "" });
 
         if (request.method == "POST" or request.method == "PUT" or request.method == "DELETE") {
             return {
@@ -316,9 +167,16 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
         };
 
-        let url = HttpParser.URL(request.url, HttpParser.Headers([]));
+        switch (assets.http_request(request)) {
+            case (#ok(response)) response;
+            case (#err(error_message)) {
+                Debug.print("Error: " # error_message);
+                Debug.print(request.url);
+                if (Text.startsWith(request.url, #text("/favicon.ico"))) return response(200, "");
 
-        assets.http_request({ request with url = url.original });
+                Assets.redirect_to(assets, request, "/404.html", [("Set-Cookie", "__ic_asset_motoko_lib_error__=" # error_message)]);
+            };
+        };
     };
 
     func response(status_code : Nat16, message : Text) : Assets.HttpResponse {
@@ -389,10 +247,6 @@ shared ({ caller = owner }) actor class () = this_canister {
 
                 let uploaded_chunk_ids = upload_chunks(batch_id, [_request.body]);
 
-                // for (uploaded_chunk_id in uploaded_chunk_ids.vals()) {
-                //     file.chunk_ids.add(uploaded_chunk_id);
-                // };
-
                 file.chunk_ids.put(chunk_id, uploaded_chunk_ids[0]);
 
                 return response(200, "Successfully uploaded chunk " # debug_show ({ batch_id; filename; chunk_id }));
@@ -427,7 +281,14 @@ shared ({ caller = owner }) actor class () = this_canister {
                 let ?key = url.queryObj.get("filename");
 
                 // Debug.print("deleting: " # debug_show key);
-                assets.delete_asset(owner, { key });
+                switch (assets.delete_asset(owner, { key })) {
+                    case (#ok()) {};
+                    case (#err(msg)) {
+                        Debug.print("Error: " # msg);
+                        return response(404, msg);
+                    };
+                };
+
                 await* update_homepage();
 
                 return response(200, "Successfully deleted " # debug_show key);
@@ -437,7 +298,6 @@ shared ({ caller = owner }) actor class () = this_canister {
         } catch (e) {
             Debug.print("this might be a trap!");
             Debug.print("Error: " # debug_show (Error.code(e), Error.message(e)));
-            // return response(500, "Internal Server Error");
             throw e;
         };
     };

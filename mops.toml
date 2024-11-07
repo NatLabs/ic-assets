@@ -4,7 +4,7 @@ description = "A library implementation of the IC Assets Canister with v2 certif
 version = "0.0.2"
 repository = "https://github.com/NatLabs/ic-assets"
 license = "MIT"
-keywords = ["certified", "http", "request", "streaming"]
+keywords = [ "certified", "http", "request", "streaming" ]
 
 [dependencies]
 base = "0.12.1"
@@ -23,7 +23,9 @@ sha2 = "0.1.0"
 test = "2.0.0"
 bench = "1.0.0"
 fuzz = "0.2.1"
+serde = "3.1.0"
+deflate = "0.1.0"
 
 [toolchain]
 wasmtime = "15.0.0"
-moc = "0.12.1"
+moc = "0.13.2"

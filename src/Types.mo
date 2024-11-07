@@ -13,7 +13,6 @@ module {
     type Set<V> = Set.Set<V>;
     type Result<T, E> = Result.Result<T, E>;
     type Time = Time.Time;
-    type Vector<A> = Vector.Vector<A>;
 
     public type Configuration = {
         var max_batches : ?Nat64;
@@ -23,14 +22,13 @@ module {
 
     public type AssetEncoding = {
         var modified : Time;
-        var content_chunks : Vector<Blob>;
+        var content_chunks : [[Nat8]];
+        var content_chunks_prefix_sum : [Nat];
+
         var total_length : Nat;
         var certified : Bool;
         var sha256 : Blob;
-        // response_hashes: Option<Map<Nat16, Blob>>;
-        // pub certificate_expression: Option<CertificateExpression>,
-        // pub response_hashes: Option<HashMap<u16, [u8; 32]>>,
-        // replace 'response_hashes' with -> response_codes: [Nat16],
+
     };
 
     public type SharedAssetEncoding = {
@@ -49,6 +47,7 @@ module {
         var max_age : ?Nat64;
         // var headers: ?Map<Text, Text>; // access from certified-assets
         var allow_raw_access : ?Bool;
+        var last_certified_encoding : ?Text;
     };
 
     public type AssetTree = {
@@ -97,7 +96,8 @@ module {
         var expires_at : Time;
         var commit_batch_arguments : ?CommitBatchArguments;
         var evidence_computation : ?EvidenceComputation;
-        var chunk_content_total_size : Nat;
+        var total_bytes : Nat;
+        chunk_ids : Vector.Vector<ChunkId>;
     };
 
     public type Key = Text;
@@ -270,6 +270,16 @@ module {
         batch_id : BatchId;
     };
 
+    public type StoredChunk = {
+        content : [Nat8];
+        batch_id : BatchId;
+    };
+
+    public type Chunks = {
+        content : [Blob];
+        batch_id : BatchId;
+    };
+
     public type ListArgs = {};
 
     public type CertifiedTree = {
@@ -350,16 +360,18 @@ module {
 
         configuration : Configuration;
 
-        chunks : Map<ChunkId, Chunk>;
+        chunks : Map<ChunkId, StoredChunk>;
         var next_chunk_id : ChunkId;
 
         batches : Map<BatchId, Batch>;
+        copy_on_write_batches : Map<BatchId, [(Text, ?Assets)]>; // for atomicity - if commit fails, revert to this
         var next_batch_id : BatchId;
 
         // permissions
         commit_principals : Set<Principal>;
         prepare_principals : Set<Principal>;
         manage_permissions_principals : Set<Principal>;
+
     };
 
     public type StableStoreTestVersion = {
@@ -399,8 +411,17 @@ module {
 
     public type CreateChunkArguments = Chunk;
 
+    public type CreateChunksArguments = {
+        batch_id : BatchId;
+        content : [Blob];
+    };
+
     public type CreateChunkResponse = {
         chunk_id : Nat;
+    };
+
+    public type CreateChunksResponse = {
+        chunk_ids : [ChunkId];
     };
 
     public type CreateBatchArguments = {};
@@ -408,8 +429,6 @@ module {
     public type CanisterInterface = actor {
         // init : shared () -> async ();
         api_version : shared query () -> async (Nat16);
-
-        retrieve : shared query (Key) -> async (Blob);
 
         get : shared query (GetArgs) -> async (EncodedAsset);
 
@@ -436,6 +455,7 @@ module {
         // certified_tree : shared query ({}) -> async (CertifiedTree);
         create_batch : shared ({}) -> async (CreateBatchResponse);
         create_chunk : shared (CreateChunkArguments) -> async (CreateChunkResponse);
+        create_chunks : shared (CreateChunksArguments) -> async (CreateChunksResponse);
 
         /// Perform all operations successfully, or reject the entire batch.
         commit_batch : shared CommitBatchArguments -> async ();

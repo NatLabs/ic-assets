@@ -33,9 +33,9 @@ module {
 
     let { nhash; thash } = Map;
 
-    func advance(
+    public func advance(
+        chunks : Map<T.ChunkId, T.StoredChunk>,
         args : T.CommitBatchArguments,
-        chunks : Map<T.ChunkId, T.Chunk>,
         evidence_computation : T.EvidenceComputation,
     ) : T.EvidenceComputation {
         switch evidence_computation {
@@ -61,13 +61,13 @@ module {
         };
     };
 
-    func next_chunk_index(args : T.CommitBatchArguments, operation_index : Nat, chunk_index : Nat, sha256 : Sha256.Digest, chunks : Map<T.ChunkId, T.Chunk>) : T.EvidenceComputation {
+    func next_chunk_index(args : T.CommitBatchArguments, operation_index : Nat, chunk_index : Nat, sha256 : Sha256.Digest, chunks : Map<T.ChunkId, T.StoredChunk>) : T.EvidenceComputation {
         let operation = args.operations[operation_index];
         switch (get_opt(args.operations, operation_index)) {
             case (? #SetAssetContent(asset_content)) switch (get_opt(asset_content.chunk_ids, chunk_index)) {
                 case (?chunk_id) {
                     switch (Map.get(chunks, nhash, chunk_id)) {
-                        case (?chunk) { sha256.writeBlob(chunk.content) };
+                        case (?chunk) { sha256.writeArray(chunk.content) };
                         case (_) {};
                     };
 

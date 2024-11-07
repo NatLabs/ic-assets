@@ -5,12 +5,12 @@ import Principal "mo:base/Principal";
 import None "mo:base/None";
 import { test; suite } "mo:test";
 
-import BaseAsset "../src/BaseAsset";
+import BaseAssets "../src/BaseAssets";
 import Assets "../src";
 import Migrations "../src/Migrations";
 
 suite(
-    "BaseAsset tests",
+    "BaseAssets tests",
     func() {
         test(
             "true",
@@ -26,7 +26,7 @@ let owner = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 let caller = Principal.fromText("tde7l-3qaaa-aaaah-qansa-cai");
 
 func init_test_store(caller : Principal) : Migrations.VersionedStableStore {
-    let asset = BaseAsset.init_stable_store(owner);
+    let asset = BaseAssets.init_stable_store(owner);
 
     let test_store : Migrations.StableStoreTestVersion = {
         asset with
@@ -35,21 +35,21 @@ func init_test_store(caller : Principal) : Migrations.VersionedStableStore {
         var next_batch_id = 1;
         deprecated_field = ();
         configuration = ();
-        streaming_callback = null
+        streaming_callback = null;
     };
 
     #_test(test_store);
 };
 
 suite(
-    "BaseAsset version tests",
+    "BaseAssets version tests",
     func() {
         test(
             "ensure init_stable_store() and share_version() return the current version",
             func() {
 
-                let asset = BaseAsset.init_stable_store(owner);
-                let sharable_asset = BaseAsset.share_version(asset);
+                let asset = BaseAssets.init_stable_store(owner);
+                let sharable_asset = BaseAssets.share_version(asset);
 
                 ignore Migrations.get_current_state(sharable_asset); // should not trap
 
@@ -65,7 +65,7 @@ suite(
 
                 ignore Migrations.get_current_state(updated_state); // should not trap
 
-                let asset = BaseAsset.from_version(test_store); // should not trap
+                let asset = BaseAssets.from_version(test_store); // should not trap
             },
         );
     },

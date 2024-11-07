@@ -1,18 +1,13 @@
 {
   "version": 1,
   "canisters": {
-    "assets_canister": {
-      "type": "motoko",
-      "main": "src/Canister.mo",
-      "init_arg": "(null)"
-    },
     "example": {
       "type": "motoko",
       "main": "example/main.mo"
     },
-    "asset-test2": {
+    "asset-test": {
       "type": "motoko",
-      "main": "tests/Assets.ActorTest.mo"
+      "main": "tests/Asset.ActorTest.mo"
     }
   },
   "defaults": {
