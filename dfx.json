@@ -5,9 +5,9 @@
       "type": "motoko",
       "main": "example/main.mo"
     },
-    "asset-test": {
+    "canister-tests": {
       "type": "motoko",
-      "main": "tests/Asset.ActorTest.mo"
+      "main": "tests/Asset.CanisterTest.mo"
     }
   },
   "defaults": {
@@ -18,7 +18,7 @@
   },
   "networks": {
     "local": {
-      "bind": "127.0.0.1:8000",
+      "bind": "127.0.0.1:4943",
       "type": "ephemeral"
     }
   }

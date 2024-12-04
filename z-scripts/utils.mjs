@@ -16,26 +16,12 @@ export function trim_end(str, char) {
 }
 
 export function parse_json(str) {
-  let formatted = extract_text_from_brackets(str, "(", ")").trim();
-
-  formatted = trim_end(formatted, ",");
-
-  formatted = extract_text_from_brackets(formatted, '"', '"');
-
-  let unquoted = formatted
-    // Handle escaped quotes
-    .replace(/\\"/g, '"')
-    // Handle quadruple-escaped quotes
-    .replace(/\\"/g, '"')
-    // Handle lone double-backslashes (like \\\\43) -> \43
-    .replace(/\\{4}(?=\d)/g, "\\");
-
   let json = {};
 
   try {
-    json = JSON.parse(unquoted);
+    json = JSON.parse(str);
   } catch (e) {
-    console.log({ str, unquoted });
+    console.log({ str });
     throw new Error("Failed to parse JSON " + e);
   }
 
@@ -46,13 +32,16 @@ export const entitle = (str) =>
   console.log("\n" + chalk.bold.underline(str) + "\n");
 
 export const print_test_result = (test) => {
-  console.log(
-    test.result
-      ? ` ✅ ${chalk.green(test.name)}`
-      : ` ${chalk.bold.red("❌")} ${chalk.bold.red(test.name)}`
-  );
+  let chalk_grey = chalk.rgb(210, 220, 220);
+
+  const func_type = chalk_grey(test.is_query ? "[query] " : "[update]");
+  const passed_or_failed_test = test.result
+    ? ` ✅ ${chalk.green(test.name)}`
+    : ` ${chalk.bold.red("❌")} ${chalk.bold.red(test.name)}`;
+
+  console.log(func_type + " " + passed_or_failed_test);
 
   for (const print_statement of test.print_log) {
-    console.log("\t" + chalk.rgb(210, 220, 220)("➥  " + print_statement));
+    console.log("\t" + chalk_grey("➥  " + print_statement));
   }
 };

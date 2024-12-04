@@ -77,13 +77,15 @@ module {
         };
 
         func get_test_tools(test : Test) : TestTools {
+            test.print_log.clear();
+
             let test_tools = {
                 ts_assert = func(result : Bool) = switch (test.result) {
                     case (null) test.result := ?result;
                     case (?old_result) test.result := ?(old_result and result);
                 };
                 ts_print = func(msg : Text) {
-                    test.print_log.add(msg);
+                    test.print_log.add(Text.replace(msg, #char('\"'), ("\\\"")));
                 };
                 ts_assert_or_print = func(result : Bool, msg : Text) {
                     switch (test.result) {

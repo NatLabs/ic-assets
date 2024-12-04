@@ -3,9 +3,11 @@ import Result "mo:base/Result";
 import Array "mo:base/Array";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
+import Iter "mo:base/Iter";
 
 import { URL; Headers } "mo:http-parser";
 import Map "mo:map/Map";
+import CertifiedAssets "mo:certified-assets/Stable";
 
 import T "Types";
 import BaseAssets "BaseAssets";
@@ -72,11 +74,30 @@ module {
     public type CanisterInterface = T.CanisterInterface;
     public type CreateChunksArguments = T.CreateChunksArguments;
     public type CreateChunksResponse = T.CreateChunksResponse;
+    public type EndpointRecord = T.EndpointRecord;
 
     public type VersionedStableStore = T.VersionedStableStore;
-    type StableStoreV0 = T.StableStoreV0;
+    type StableStore = T.StableStore;
 
     public let MAX_CHUNK_SIZE = BaseAssets.MAX_CHUNK_SIZE;
+
+    public func from_version(versions : T.VersionedStableStore) : StableStore {
+        let upgraded_store = Migrations.upgrade(versions);
+        Migrations.get_current_state(upgraded_store);
+    };
+
+    public func share_version(self : StableStore) : T.VersionedStableStore {
+        Migrations.share_version(self);
+    };
+
+    public func init_stable_store(canister_id : Principal, owner : Principal) : VersionedStableStore {
+        let stable_store_v0 = BaseAssets.init_stable_store(canister_id, owner);
+        share_version(stable_store_v0);
+    };
+
+    public func upgrade(asset_versions : VersionedStableStore) : VersionedStableStore {
+        Migrations.upgrade(asset_versions);
+    };
 
     public func div_ceiling(a : Nat, b : Nat) : Nat {
         (a + (b - 1)) / b;
@@ -93,20 +114,8 @@ module {
         div_ceiling(total_length, MAX_CHUNK_SIZE);
     };
 
-    public func init_stable_store(owner : Principal) : VersionedStableStore {
-        let stable_store_v0 = BaseAssets.init_stable_store(owner);
-        #v0(stable_store_v0);
-    };
-
-    public func migrate(asset_versions : VersionedStableStore) : VersionedStableStore {
-        Migrations.migrate(asset_versions);
-    };
-
     public func redirect_to(assets : Assets, prev_http_request : T.HttpRequest, path : Text, headers : [(Text, Text)]) : T.HttpResponse {
-        let canister_id = switch (assets.get_canister_id()) {
-            case (?id) id;
-            case (null) return Debug.trap("Canister ID not set.");
-        };
+        let canister_id = assets.get_canister_id();
 
         let url = URL(prev_http_request.url, Headers(prev_http_request.headers));
 
@@ -136,7 +145,7 @@ module {
             BaseAssets.set_canister_id(state, id);
         };
 
-        public func get_canister_id() : ?Principal {
+        public func get_canister_id() : Principal {
             BaseAssets.get_canister_id(state);
         };
 
@@ -288,8 +297,8 @@ module {
         /// Required Permission: [Prepare](#permission-prepare)
         /// todo - indicate somewhere that the chunk ids have to be listed in order when calling set_asset_content or using the #SetAssetContent operation
 
-        public func create_chunk(caller : Principal, args : T.Chunk) : async* Result<T.CreateChunkResponse, Text> {
-            await* BaseAssets.create_chunk(state, caller, args);
+        public func create_chunk(caller : Principal, args : T.Chunk) : Result<T.CreateChunkResponse, Text> {
+            BaseAssets.create_chunk(state, caller, args);
         };
 
         /// This method stores a number of chunks and extends the batch expiry time.
@@ -448,6 +457,10 @@ module {
 
         public func http_request(req : T.HttpRequest) : Result<T.HttpResponse, Text> {
             BaseAssets.http_request(state, req);
+        };
+
+        public func get_certified_endpoints() : [T.EndpointRecord] {
+            Iter.toArray(CertifiedAssets.endpoints(state.certificate_store));
         };
 
     };

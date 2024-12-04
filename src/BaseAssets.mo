@@ -18,7 +18,6 @@ import T "Types";
 
 import AssetUtils "AssetUtils";
 import Utils "Utils";
-import Migrations "Migrations";
 
 module {
 
@@ -74,13 +73,13 @@ module {
     public type CreateChunkArguments = T.CreateChunkArguments;
     public type CreateChunkResponse = T.CreateChunkResponse;
 
-    public type StableStore = T.StableStoreV0;
+    public type StableStore = T.StableStore;
 
     public let MAX_CHUNK_SIZE = AssetUtils.MAX_CHUNK_SIZE;
 
-    public func init_stable_store(owner : Principal) : StableStore {
+    public func init_stable_store(canister_id : Principal, owner : Principal) : StableStore {
         let state : StableStore = {
-            var canister_id = null;
+            var canister_id = canister_id;
             var streaming_callback = null;
             assets = Map.new();
             certificate_store = CertifiedAssets.init_stable_store();
@@ -110,7 +109,7 @@ module {
     };
 
     public func set_canister_id(self : StableStore, canister_id : Principal) : () {
-        self.canister_id := ?canister_id;
+        self.canister_id := canister_id;
     };
 
     public func set_streaming_callback(self : StableStore, callback : T.StreamingCallback) {
@@ -121,7 +120,7 @@ module {
         self.streaming_callback;
     };
 
-    public func get_canister_id(self : StableStore) : ?Principal {
+    public func get_canister_id(self : StableStore) : Principal {
         self.canister_id;
     };
 
@@ -131,15 +130,6 @@ module {
 
     public func http_request_streaming_callback(self : StableStore, token : T.StreamingToken) : T.StreamingCallbackResponse {
         AssetUtils.http_request_streaming_callback(self, token);
-    };
-
-    public func from_version(versions : T.VersionedStableStore) : StableStore {
-        let migrated_store = Migrations.migrate(versions);
-        Migrations.get_current_state(migrated_store);
-    };
-
-    public func share_version(self : StableStore) : T.VersionedStableStore {
-        #v0(self);
     };
 
     public func api_version() : Nat16 = 1;
@@ -220,9 +210,9 @@ module {
         };
     };
 
-    public func create_chunk(self : StableStore, caller : Principal, args : T.CreateChunkArguments) : async* Result<(T.CreateChunkResponse), Text> {
+    public func create_chunk(self : StableStore, caller : Principal, args : T.CreateChunkArguments) : Result<(T.CreateChunkResponse), Text> {
         switch (AssetUtils.can_prepare(self, caller)) {
-            case (#ok(_)) await AssetUtils.create_chunk(self, args);
+            case (#ok(_)) AssetUtils.create_chunk(self, args);
             case (#err(msg)) #err(msg);
         };
     };
@@ -311,18 +301,18 @@ module {
     };
 
     public func revoke_permission(self : StableStore, caller : Principal, args : RevokePermission) : async* Result<(), Text> {
-        var has_permission = if (args.of_principal == caller) {
+        let is_caller_trying_to_revoke_their_own_permission = args.of_principal == caller;
+
+        if (is_caller_trying_to_revoke_their_own_permission) {
+            // caller does not have said permission
             if (not AssetUtils.has_permission(self, args.of_principal, args.permission)) {
                 return #ok();
             };
-
-            true;
-        } else {
-            AssetUtils.has_permission(self, caller, #ManagePermissions);
         };
 
-        if (not has_permission) {
-            switch (await* AssetUtils.is_controller(self, caller)) {
+        if (not is_caller_trying_to_revoke_their_own_permission) {
+            // check if caller has manager or controller permissions
+            switch (await* AssetUtils.is_manager_or_controller(self, caller)) {
                 case (#ok(_)) {};
                 case (#err(msg)) return #err(msg);
             };

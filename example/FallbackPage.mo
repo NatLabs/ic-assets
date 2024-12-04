@@ -1,5 +1,5 @@
 module {
-    public func get_404_page() : Text {
+    public func get_fallback_page() : Text {
         // Chat GPT generated 404 page
         "<!DOCTYPE html>
             <html lang=\"en\">
@@ -7,7 +7,7 @@ module {
                 <meta charset=\"UTF-8\">
                 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
                 <meta http-equiv=\"X-UA-Compatible\" content=\"ie=edge\">
-                <title>404 - Page Not Found</title>
+                <title>Fallback Page</title>
                 <style>
                     body {
                         margin: 0;
@@ -65,7 +65,7 @@ module {
             </head>
             <body>
                 <div class=\"container\">
-                    <h1>404</h1>
+                    <h1>Fallback Page</h1>
                     <h2>Oops! Page not found.</h2>
                     <p class=\"funny-message\" id=\"funnyMessage\"></p>
                     <a href=\"javascript:void(0);\" class=\"back-link\" onclick=\"window.location.href = window.location.origin + '/homepage' + window.location.search;\">Take me home!</a>
@@ -75,11 +75,10 @@ module {
                     const messages = [
                         \"The page you're looking for has taken a vacation.\",
                         \"Looks like this page got lost in the matrix.\",
-                        \"404: The page went to the wrong URL party.\",
                         \"Oops! This is a digital black hole.\",
                         \"This page must be hiding in a parallel universe.\",
                         \"We broke it. Let’s pretend this never happened.\",
-                        \"You’ve found the secret error page! (Not really.)\",
+                        \"You’ve found the secret fallback page! (Not really.)\",
                     ];
 
                     function getRandomMessage() {

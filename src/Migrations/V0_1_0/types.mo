@@ -7,18 +7,7 @@ import CertifiedAssets "mo:certified-assets/Stable";
 import SHA256 "mo:sha2/Sha256";
 import Vector "mo:vector";
 
-// can't import migrations directly - import Migrations "Migrations";
-// instead we can import the types file
-import V0_types "Migrations/V0/types";
-import V0_1_0_types "Migrations/V0_1_0/types";
-
-module {
-
-    // need to duplicate the definition here instead of referencing to avoid circular dependencies
-    public type VersionedStableStore = {
-        #v0 : V0_types.StableStore;
-        #v0_1_0 : V0_1_0_types.StableStore;
-    };
+module V0_1_0_Types {
 
     type Map<K, V> = Map.Map<K, V>;
     type Set<V> = Set.Set<V>;
@@ -58,7 +47,6 @@ module {
         headers : Map<Text, Text>;
         var is_aliased : ?Bool;
         var max_age : ?Nat64;
-        // var headers: ?Map<Text, Text>; // access from certified-assets
         var allow_raw_access : ?Bool;
         var last_certified_encoding : ?Text;
     };
@@ -97,7 +85,6 @@ module {
         #NextChunkIndex : NextChunkIndex;
         #Computed : Blob;
     };
-
     public type Batch = {
         var expires_at : Time;
         var commit_batch_arguments : ?CommitBatchArguments;

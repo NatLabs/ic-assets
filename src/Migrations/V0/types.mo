@@ -3,29 +3,47 @@ import Time "mo:base/Time";
 
 import Set "mo:map/Set";
 import Map "mo:map/Map";
-import CertifiedAssets "mo:certified-assets/Stable";
+import CertifiedAssets "mo:certified-assets";
 import SHA256 "mo:sha2/Sha256";
 import Vector "mo:vector";
 
-// can't import migrations directly - import Migrations "Migrations";
-// instead we can import the types file
-import V0_types "Migrations/V0/types";
-import V0_1_0_types "Migrations/V0_1_0/types";
+import HttpTypes "mo:http-types";
 
-module {
-
-    // need to duplicate the definition here instead of referencing to avoid circular dependencies
-    public type VersionedStableStore = {
-        #v0 : V0_types.StableStore;
-        #v0_1_0 : V0_1_0_types.StableStore;
-    };
+module V0 {
 
     type Map<K, V> = Map.Map<K, V>;
     type Set<V> = Set.Set<V>;
     type Result<T, E> = Result.Result<T, E>;
     type Time = Time.Time;
+    type Vector<A> = Vector.Vector<A>;
 
-    public type EndpointRecord = CertifiedAssets.EndpointRecord;
+    public func init_stable_store(owner : Principal) : StableStore {
+        let state : StableStore = {
+            var canister_id = null;
+            var streaming_callback = null;
+            assets = Map.new();
+            certificate_store = CertifiedAssets.init_stable_store();
+
+            configuration = {
+                var max_batches = null;
+                var max_chunks = null;
+                var max_bytes = null;
+            };
+
+            chunks = Map.new();
+            var next_chunk_id = 1;
+
+            batches = Map.new();
+            var next_batch_id = 1;
+
+            commit_principals = Set.new();
+            prepare_principals = Set.new();
+            manage_permissions_principals = Set.new();
+
+        };
+
+        state;
+    };
 
     public type Configuration = {
         var max_batches : ?Nat64;
@@ -35,13 +53,10 @@ module {
 
     public type AssetEncoding = {
         var modified : Time;
-        var content_chunks : [[Nat8]];
-        var content_chunks_prefix_sum : [Nat];
-
+        var content_chunks : Vector<Blob>;
         var total_length : Nat;
         var certified : Bool;
         var sha256 : Blob;
-
     };
 
     public type SharedAssetEncoding = {
@@ -58,9 +73,7 @@ module {
         headers : Map<Text, Text>;
         var is_aliased : ?Bool;
         var max_age : ?Nat64;
-        // var headers: ?Map<Text, Text>; // access from certified-assets
         var allow_raw_access : ?Bool;
-        var last_certified_encoding : ?Text;
     };
 
     public type SharedAsset = {
@@ -83,13 +96,13 @@ module {
 
     public type NextOperation = {
         operation_index : Nat;
-        hasher_state : SHA256.StaticSha256;
+        hasher : SHA256.StaticSha256;
     };
 
     public type NextChunkIndex = {
         operation_index : Nat;
         chunk_index : Nat;
-        hasher_state : SHA256.StaticSha256;
+        hasher : SHA256.StaticSha256;
     };
 
     public type EvidenceComputation = {
@@ -102,8 +115,7 @@ module {
         var expires_at : Time;
         var commit_batch_arguments : ?CommitBatchArguments;
         var evidence_computation : ?EvidenceComputation;
-        var total_bytes : Nat;
-        chunk_ids : Vector.Vector<ChunkId>;
+        var chunk_content_total_size : Nat;
     };
 
     public type Key = Text;
@@ -115,7 +127,7 @@ module {
         key : Key;
         content_type : Text;
         max_age : ?Nat64;
-        headers : ?[Header];
+        headers : ?[HttpTypes.Header];
         enable_aliasing : ?Bool;
         allow_raw_access : ?Bool;
     };
@@ -143,7 +155,7 @@ module {
     public type SetAssetPropertiesArguments = {
         key : Key;
         max_age : ??Nat64;
-        headers : ??[Header];
+        headers : ??[HttpTypes.Header];
         allow_raw_access : ??Bool;
         is_aliased : ??Bool;
     };
@@ -276,16 +288,6 @@ module {
         batch_id : BatchId;
     };
 
-    public type StoredChunk = {
-        content : [Nat8];
-        batch_id : BatchId;
-    };
-
-    public type Chunks = {
-        content : [Blob];
-        batch_id : BatchId;
-    };
-
     public type ListArgs = {};
 
     public type CertifiedTree = {
@@ -295,7 +297,7 @@ module {
 
     public type AssetProperties = {
         max_age : ?Nat64;
-        headers : ?[Header];
+        headers : ?[HttpTypes.Header];
         allow_raw_access : ?Bool;
         is_aliased : ?Bool;
     };
@@ -313,77 +315,43 @@ module {
 
     public type Contents = Blob;
 
-    public type Header = (Text, Text);
-
-    public type HttpResponse = {
-        status_code : Nat16;
-        headers : [Header];
-        body : Blob;
-        streaming_strategy : ?StreamingStrategy;
-        upgrade : ?Bool;
-    };
-
-    public type HttpRequest = {
-        url : Text;
-        method : Text;
-        headers : [Header];
-        body : Blob;
-        certificate_version : ?Nat16;
-    };
-
-    public type StreamingStrategy = {
-        #Callback : {
-            callback : StreamingCallback;
-            token : StreamingToken;
-        };
-    };
-
-    public type StreamingCallback = shared query (StreamingToken) -> async StreamingCallbackResponse;
-    public type StreamingToken = {
+    public type HttpResponse = HttpTypes.Response;
+    public type HttpRequest = HttpTypes.Request;
+    public type StreamingCallback = HttpTypes.StreamingCallback;
+    public type StreamingToken = HttpTypes.StreamingToken;
+    public type CustomStreamingToken = {
         key : Key;
         sha256 : ?Blob;
         content_encoding : Text;
         index : Nat;
     };
-    public type CustomStreamingToken = StreamingToken;
-    public type StreamingCallbackResponse = {
-        body : Blob;
-        token : ?StreamingToken;
-    };
-
-    public type StreamingCallbackResponseAny = {
-        body : Blob;
-        token : ?Any;
-    };
+    public type StreamingCallbackResponse = HttpTypes.StreamingCallbackResponse;
 
     // Migrations
     public type StableStore = {
 
-        var canister_id : Principal;
-        var streaming_callback : ?StreamingCallback;
+        var canister_id : ?Principal;
+        var streaming_callback : ?HttpTypes.StreamingCallback;
         assets : Map<Key, Assets>;
         certificate_store : CertifiedAssets.StableStore;
 
         configuration : Configuration;
 
-        chunks : Map<ChunkId, StoredChunk>;
+        chunks : Map<ChunkId, Chunk>;
         var next_chunk_id : ChunkId;
 
         batches : Map<BatchId, Batch>;
-        copy_on_write_batches : Map<BatchId, [(Text, ?Assets)]>; // for atomicity - if commit fails, revert to this
         var next_batch_id : BatchId;
 
         // permissions
         commit_principals : Set<Principal>;
         prepare_principals : Set<Principal>;
         manage_permissions_principals : Set<Principal>;
-
     };
 
     public type SharedInterface = {
         canister_id : Principal;
         assets : [(Key, SharedAsset)];
-
     };
 
     public type CreateBatchResponse = {
@@ -392,17 +360,8 @@ module {
 
     public type CreateChunkArguments = Chunk;
 
-    public type CreateChunksArguments = {
-        batch_id : BatchId;
-        content : [Blob];
-    };
-
     public type CreateChunkResponse = {
         chunk_id : Nat;
-    };
-
-    public type CreateChunksResponse = {
-        chunk_ids : [ChunkId];
     };
 
     public type CreateBatchArguments = {};
@@ -410,6 +369,8 @@ module {
     public type CanisterInterface = actor {
         // init : shared () -> async ();
         api_version : shared query () -> async (Nat16);
+
+        retrieve : shared query (Key) -> async (Blob);
 
         get : shared query (GetArgs) -> async (EncodedAsset);
 
@@ -436,7 +397,6 @@ module {
         // certified_tree : shared query ({}) -> async (CertifiedTree);
         create_batch : shared ({}) -> async (CreateBatchResponse);
         create_chunk : shared (CreateChunkArguments) -> async (CreateChunkResponse);
-        create_chunks : shared (CreateChunksArguments) -> async (CreateChunksResponse);
 
         /// Perform all operations successfully, or reject the entire batch.
         commit_batch : shared CommitBatchArguments -> async ();
@@ -470,8 +430,8 @@ module {
         // /// Compute a hash over the CommitBatchArguments.  Call until it returns Some(evidence).
         compute_evidence : shared (ComputeEvidenceArguments) -> async (?Blob);
 
-        http_request : (HttpRequest) -> async (HttpResponse);
-        http_request_streaming_callback : StreamingCallback;
+        http_request : (HttpTypes.Request) -> async (HttpTypes.Response);
+        http_request_streaming_callback : HttpTypes.StreamingCallback;
 
     };
 

@@ -69,9 +69,11 @@ shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.Ca
     };
 
     stable var assets_sstore = Assets.init_stable_store(owner);
-    assets_sstore := Assets.migrate(assets_sstore);
+    assets_sstore := Assets.upgrade(assets_sstore);
 
     let assets = Assets.Assets(assets_sstore);
+    assets.set_canister_id(canister_id());
+    assets.set_steaming_callback(http_request_streaming_callback);
 
     public query func http_request_streaming_callback(token : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
         assets.http_request_streaming_callback(token);
@@ -79,18 +81,6 @@ shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.Ca
 
     public query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
         Utils.extract_result(assets.http_request(request));
-    };
-
-    public shared func init() : async () {
-        let id = await canister_id();
-        assets.set_canister_id(id);
-        assets.set_streaming_callback(http_request_streaming_callback);
-    };
-
-    system func timer(setGlobalTimer : Nat64 -> ()) : async () {
-        let id = await canister_id();
-        assets.set_canister_id(id);
-        assets.set_streaming_callback(http_request_streaming_callback);
     };
 
     public shared query func api_version() : async Nat16 {
@@ -156,7 +146,7 @@ shared ({ caller = owner }) actor class AssetsCanister(canister_args : Assets.Ca
     };
 
     public shared ({ caller }) func create_chunk(args : Assets.CreateChunkArguments) : async (Assets.CreateChunkResponse) {
-        (await* assets.create_chunk(caller, args)) |> Utils.extract_result(_);
+        (assets.create_chunk(caller, args)) |> Utils.extract_result(_);
     };
 
     public shared ({ caller }) func create_chunks(args : Assets.CreateChunksArguments) : async Assets.CreateChunksResponse {

@@ -34,31 +34,20 @@ There are couple things you need to do to use the Assets library in your caniste
     import Assets "mo:ic-assets";
 
     actor class() = this_canister {
+
         stable var assets_sstore = Assets.init_stable_store(owner);
-        assets_sstore := Assets.migrate(assets_sstore);
+        assets_sstore := Assets.upgrade(assets_sstore);
 
-        let assets = Assets.Assets(assets_sstore);
-        stable var is_assets_initialized = false;
+        let canister_id  = Principal.fromActor(this_canister);
 
-        /// Need to call this function the first time the canister is created
-        public shared func init() : async () {
-            let id = Principal.fromActor(this_canister);
-            assets.set_canister_id(id);
-            assets.set_streaming_callback(http_request_streaming_callback);
-
-            is_assets_initialized := true;
-        };
-
-        public shared ({ caller }) func store(args : Assets.StoreArgs) : async () {
-            if (not is_assets_initialized) await init();
-            assets.store(caller, args);
-        };
-
-        ... // other functions from the Assets interface
+        let assets = Assets.Assets(assets_sstore,);
+        assets.set_canister_id(canister_id); // required
 
         public query func http_request_streaming_callback(token : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
             ?assets.http_request_streaming_callback(token);
         };
+
+        assets.set_streaming_callback(http_request_streaming_callback); // required
 
         public query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
             assets.http_request(request);

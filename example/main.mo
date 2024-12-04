@@ -19,8 +19,9 @@ import Itertools "mo:itertools/Iter";
 // import Web "mo:web-io";
 
 import Assets "../src";
-import { get_404_page } "404Page";
+import { get_fallback_page } "FallbackPage";
 import { homepage } "Homepage";
+import V0 "../src/Migrations/V0/upgrade";
 
 shared ({ caller = owner }) actor class () = this_canister {
 
@@ -36,22 +37,29 @@ shared ({ caller = owner }) actor class () = this_canister {
     type Map<K, V> = Map.Map<K, V>;
     let current_uploads : Map<Nat, Map<Text, File>> = Map.new();
 
-    stable var assets_sstore = Assets.init_stable_store(owner);
-    assets_sstore := Assets.migrate(assets_sstore);
-    let assets = Assets.Assets(assets_sstore);
+    let canister_id = Principal.fromActor(this_canister);
+    stable var assets_sstore = Assets.init_stable_store(canister_id, owner);
+    stable let assets_sstore_2 = Assets.upgrade(assets_sstore_clone);
+
+    let assets = Assets.Assets(assets_sstore_2);
+
+    assets.set_canister_id(canister_id);
 
     public query func http_request_streaming_callback(token : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
         assets.http_request_streaming_callback(token);
     };
 
-    // Acts as the initialization function for the canister.
-    // > Warning: using the system timer will cause the Timer.mo library to not function properly.
-    system func timer(setGlobalTimer : Nat64 -> ()) : async () {
-        let id = _canister_id();
-        assets.set_canister_id(id);
-        assets.set_streaming_callback(http_request_streaming_callback);
+    assets.set_streaming_callback(http_request_streaming_callback);
 
-        await* certify_404_page();
+    public query func get_certified_endpoints() : async [Assets.EndpointRecord] {
+        assets.get_certified_endpoints();
+    };
+
+    // Acts as the init function for the canister.
+    // > Warning: using the system timer will cause the Timer.mo library to not function properly.
+    // using this method because post_upgrade doesn't work during init, or the first upgrade but only after the first upgrade
+    system func timer(setGlobalTimer : Nat64 -> ()) : async () {
+        await* certify_fallback_page();
         await* update_homepage();
         Debug.print("Re-Certified 404 page and updated homepage");
     };
@@ -147,11 +155,11 @@ shared ({ caller = owner }) actor class () = this_canister {
         await* commit_batch(batch_id);
     };
 
-    func certify_404_page() : async* () {
-        let _404_page = get_404_page();
+    func certify_fallback_page() : async* () {
+        let _fallback_page = get_fallback_page();
 
         let batch_id = create_batch();
-        await* upload(batch_id, "/404.html", "text/html", [Text.encodeUtf8(_404_page)]);
+        await* upload(batch_id, "/fallback/index.html", "text/html", [Text.encodeUtf8(_fallback_page)]);
         await* commit_batch(batch_id);
     };
 
@@ -300,10 +308,6 @@ shared ({ caller = owner }) actor class () = this_canister {
             Debug.print("Error: " # debug_show (Error.code(e), Error.message(e)));
             throw e;
         };
-    };
-
-    func _canister_id() : Principal {
-        Principal.fromActor(this_canister);
     };
 
     func nat_from_text(text : Text) : Nat {

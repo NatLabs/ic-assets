@@ -20,6 +20,7 @@ import IC "mo:ic";
 import CertifiedAssets "mo:certified-assets/Stable";
 import Itertools "mo:itertools/Iter";
 import PeekableIter "mo:itertools/PeekableIter";
+import RevIter "mo:itertools/RevIter";
 import Sha256 "mo:sha2/Sha256";
 import Vector "mo:vector";
 import HttpParser "mo:http-parser";
@@ -27,7 +28,6 @@ import Hex "mo:encoding/Hex";
 
 import Utils "Utils";
 import T "Types";
-import Migrations "Migrations";
 import Evidence "Evidence";
 
 module {
@@ -44,6 +44,7 @@ module {
     type Batch = T.Batch;
     type Key = T.Key;
     type Chunk = T.Chunk;
+    type StableStore = T.StableStore;
 
     type URL = HttpParser.URL;
     let URL = HttpParser.URL;
@@ -53,8 +54,6 @@ module {
 
     let { phash } = Set;
     let { thash; nhash } = Map;
-
-    type StableStore = Migrations.StableStoreV0;
 
     public func get_permission_set(self : StableStore, permission : T.Permission) : Set<Principal> {
         switch (permission) {
@@ -97,10 +96,7 @@ module {
     };
 
     public func is_controller(self : StableStore, caller : Principal) : async* Result<(), Text> {
-        let canister_id = switch (self.canister_id) {
-            case (?id) id;
-            case (null) return #err("Canister ID not set.");
-        };
+        let canister_id = self.canister_id;
 
         let info = await ic.canister_info({
             canister_id;
@@ -188,7 +184,7 @@ module {
         for (key_or_alias in key_and_aliases) {
 
             // Debug.print("Certifying " # key_or_alias # " with encoding " # encoding_name);
-            let headers = build_headers(asset, encoding_name);
+            let headers = build_headers(asset, encoding_name, encoding.sha256);
             let headers_array = Map.toArray(headers);
 
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
@@ -209,7 +205,7 @@ module {
     func remove_encoding_certificate(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text, encoding : T.AssetEncoding, only_aliases : Bool) {
         // verify that `only_aliases is set to true only if the asset is aliased
         // if not, then we are probably calling this function incorrectly
-        Debug.print(debug_show { is_aliased = asset.is_aliased; only_aliases });
+        Debug.print(debug_show { asset_key; is_aliased = asset.is_aliased; only_aliases });
         assert (asset.is_aliased != ?true and only_aliases == false) or asset.is_aliased == ?true;
 
         let aliases = if (asset.is_aliased == ?true) get_key_aliases(self, asset_key) else Itertools.empty();
@@ -218,7 +214,7 @@ module {
         for (key_or_alias in keys) {
             Debug.print("Removing certification for " # key_or_alias # " (alias of " # debug_show asset_key # ") with encoding " # encoding_name);
 
-            let headers = build_headers(asset, encoding_name);
+            let headers = build_headers(asset, encoding_name, encoding.sha256);
             let headers_array = Map.toArray(headers);
 
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
@@ -230,10 +226,13 @@ module {
             CertifiedAssets.remove(self.certificate_store, not_modified_endpoint);
         };
 
-        encoding.certified := false;
+        if (not only_aliases) {
+            encoding.certified := false;
 
-        // only used for certification v1
-        asset.last_certified_encoding := null;
+            // only used for certification v1
+            asset.last_certified_encoding := null;
+
+        };
 
     };
 
@@ -620,7 +619,6 @@ module {
 
     func hash_bytes(sha256 : Sha256.Digest, chunks : Iter.Iter<[Nat8]>) : async () {
         for (content in chunks) {
-            // Debug.print("hashing chunked content: " # debug_show Text.decodeUtf8(Blob.fromArray(content)));
             sha256.writeArray(content);
         };
     };
@@ -650,10 +648,8 @@ module {
         };
 
         assert content_chunks_prefix_sum.size() == content_chunks.size();
-        Debug.print("content_chunks_prefix_sum: " # debug_show (content_chunks_prefix_sum));
         prev_accumulated_size := 0;
         for ((i, accumulated_size) in Itertools.enumerate(content_chunks_prefix_sum.vals())) {
-            Debug.print("(accumulated_size, prev_accumulated_size): " # debug_show (accumulated_size, prev_accumulated_size));
             assert accumulated_size >= prev_accumulated_size;
 
             let is_exceeding_limit = accumulated_size - prev_accumulated_size > MAX_HASHING_BYTES_PER_CALL;
@@ -941,7 +937,7 @@ module {
     };
 
     // todo - replace the for loop with a better solution for checking if all the bytes are within the limit
-    public func create_chunk(self : StableStore, args : T.Chunk) : async Result<T.CreateChunkResponse, Text> {
+    public func create_chunk(self : StableStore, args : T.Chunk) : Result<T.CreateChunkResponse, Text> {
 
         switch (self.configuration.max_chunks) {
             case (?max_chunks) {
@@ -987,12 +983,18 @@ module {
         #ok({ chunk_id });
     };
 
+    func create_async_chunk(self : StableStore, args : T.Chunk) : async Result<T.CreateChunkResponse, Text> {
+        let res = create_chunk(self, args);
+        let #ok({ chunk_id }) = res else return Utils.send_error(res);
+        #ok({ chunk_id });
+    };
+
     public func create_chunks(self : StableStore, args : T.CreateChunksArguments) : async* Result<T.CreateChunksResponse, Text> {
         let parallel = Buffer.Buffer<(async Result<T.CreateChunkResponse, Text>)>(args.content.size());
         let chunk_ids = Buffer.Buffer<Nat>(args.content.size());
 
         for (chunk in args.content.vals()) {
-            let async_call = create_chunk(self, { batch_id = args.batch_id; content = chunk });
+            let async_call = create_async_chunk(self, { batch_id = args.batch_id; content = chunk });
             parallel.add(async_call);
         };
 
@@ -1234,10 +1236,7 @@ module {
     };
 
     func redirect_to_certified_domain(self : StableStore, url : URL) : T.HttpResponse {
-        let canister_id = switch (self.canister_id) {
-            case (?id) id;
-            case (null) return Debug.trap("Canister ID not set.");
-        };
+        let canister_id = self.canister_id;
 
         let path = url.path.original;
         let domain = url.host.original;
@@ -1281,7 +1280,7 @@ module {
         );
     };
 
-    func build_headers(asset : Assets, encoding_name : Text) : Map<Text, Text> {
+    func build_headers(asset : Assets, encoding_name : Text, encoding_sha256 : Blob) : Map<Text, Text> {
         let headers = Map.new<Text, Text>();
         ignore Map.put(headers, thash, "content-type", asset.content_type);
 
@@ -1295,6 +1294,10 @@ module {
         if (encoding_name != "identity") {
             ignore Map.put(headers, thash, "content-encoding", encoding_name);
         };
+
+        let hex = Hex.encode(Blob.toArray(encoding_sha256));
+        let etag_value = "\"" # hex # "\"";
+        ignore Map.put(headers, thash, "etag", etag_value);
 
         for ((key, value) in Map.entries(asset.headers)) {
             ignore Map.put(headers, thash, key, value);
@@ -1327,12 +1330,11 @@ module {
             sha256 = ?encoding.sha256;
         };
 
-        assert chunk == "";
-
         // Debug.print("Next token: " # debug_show next_token);
         let response : T.StreamingCallbackResponse = {
             body = chunk;
-            token = if (next_token.index < Nat.max(6, num_chunks)) ?(next_token) else (null);
+            // token = if (next_token.index < Nat.max(6, num_chunks)) ?(next_token) else (null);
+            token = if (next_token.index < num_chunks) ?(next_token) else (null);
         };
 
         // Debug.print("response: " # debug_show response);
@@ -1350,9 +1352,10 @@ module {
         chunk_index : Nat,
         etags : [Text],
         http_req : T.HttpRequest,
-    ) : T.HttpResponse {
+        opt_fallback_key : ?T.Key,
+    ) : Result<T.HttpResponse, Text> {
 
-        let headers = build_headers(asset, encoding_name);
+        let headers = build_headers(asset, encoding_name, encoding.sha256);
         let next_token : T.StreamingToken = {
             key;
             content_encoding = encoding_name;
@@ -1388,16 +1391,12 @@ module {
         // Debug.print("content (index, bytes): " # debug_show (chunk_index, content_chunk.size()));
         assert content_chunk.size() <= 2 * (1024 ** 2);
 
-        // Debug.print("contains_hash: " # debug_show contains_hash);
+        Debug.print("contains_hash: " # debug_show contains_hash);
 
         let (status_code, body, opt_body_hash) : (Nat16, Blob, ?Blob) = if (contains_hash) {
-            // (304, "", null);
-            (200, content_chunk, ?encoding.sha256);
+            (304, "", null);
+            // (200, content_chunk, ?encoding.sha256);
         } else {
-
-            let hex = Hex.encode(Blob.toArray(encoding.sha256));
-            let etag_value = "\"" # hex # "\"";
-            ignore Map.put(headers, thash, "etag", etag_value);
 
             (200, content_chunk, ?encoding.sha256);
         };
@@ -1417,7 +1416,12 @@ module {
 
         // Debug.print("http_res: " # debug_show { http_res with body = "" });
         // Debug.print(debug_show { http_req; http_res = { http_res with streaming_strategy = null } });
-        let certified_headers_result = CertifiedAssets.get_certificate(self.certificate_store, http_req, http_res, opt_body_hash);
+        let certified_headers_result = switch (opt_fallback_key) {
+            case (?fallback_key) {
+                CertifiedAssets.get_fallback_certificate(self.certificate_store, http_req, fallback_key, http_res, opt_body_hash);
+            };
+            case (null) CertifiedAssets.get_certificate(self.certificate_store, http_req, http_res, opt_body_hash);
+        };
 
         switch (certified_headers_result) {
             case (#ok(certified_headers)) {
@@ -1435,14 +1439,14 @@ module {
                     headers = Buffer.toArray(headers_buffer);
                     body;
                     upgrade = null;
-                    streaming_strategy = if (num_chunks > Nat.min(0, num_chunks)) ?streaming_strategy else null;
+                    streaming_strategy = if (num_chunks > 1) ?streaming_strategy else null;
                 };
 
                 // Debug.print("certified_res: " # debug_show { certified_res with streaming_strategy = false });
 
-                return certified_res;
+                return #ok(certified_res);
             };
-            case (#err(err_msg)) return Debug.trap("CertifiedAssets.get_certificate failed: " # err_msg);
+            case (#err(err_msg)) return #err("CertifiedAssets.get_certificate failed: " # err_msg # "\n" # debug_show { http_req; http_res = { http_res with streaming_strategy = null } });
         };
     };
 
@@ -1505,19 +1509,37 @@ module {
         };
     };
 
-    public func build_http_response(self : StableStore, req : T.HttpRequest, url : URL, encodings : [Text]) : Result<T.HttpResponse, Text> {
+    func get_fallback_asset(self : StableStore, key : Text) : ?(Text, Assets) {
+
+        let paths = Iter.toArray(Text.split(key, #text("/")));
+
+        for (i in RevIter.range(0, paths.size()).rev()) {
+            let slice = Itertools.fromArraySlice(paths, 0, i + 1);
+            let possible_fallback_prefix = Text.join(("/"), slice);
+            let possible_fallback_key = possible_fallback_prefix # "/index.html";
+
+            switch (get_asset_using_aliases(self, possible_fallback_key, false)) {
+                case (?asset) return ?(possible_fallback_key, asset);
+                case (_) {};
+            };
+        };
+
+        null;
+
+    };
+
+    public func build_http_response(self : StableStore, _req : T.HttpRequest, url : URL, encodings : [Text]) : Result<T.HttpResponse, Text> {
         let path = url.path.original;
+        var key = format_key(path);
+        var opt_fallback_key : ?Text = null;
+        var req = _req;
 
         let cert_version : Nat16 = switch (req.certificate_version) {
             case (?v) v;
             case (_) 2;
         };
 
-        let opt_asset = get_asset_using_aliases(self, path, true);
-
-        // Debug.print("asset exists: " # debug_show path);
-
-        let asset = switch (opt_asset) {
+        let asset = switch (get_asset_using_aliases(self, key, true)) {
             case (?asset) {
                 if ((not Option.get(asset.allow_raw_access, true)) and Text.contains(url.host.original, #text "raw.ic")) {
                     return redirect_to_certified_domain(self, url) |> #ok(_);
@@ -1525,8 +1547,18 @@ module {
 
                 asset;
             };
+            case (_) switch (get_fallback_asset(self, key)) {
+                case (?(fallback_key, asset)) {
+                    if ((not Option.get(asset.allow_raw_access, true)) and Text.contains(url.host.original, #text "raw.ic")) {
+                        return redirect_to_certified_domain(self, url) |> #ok(_);
+                    };
 
-            case (_) return #err(ErrorMessages.asset_not_found(path));
+                    opt_fallback_key := ?fallback_key;
+
+                    asset;
+                };
+                case (null) return #err(ErrorMessages.asset_not_found(path));
+            };
         };
 
         let etag_value = Array.find(
@@ -1545,7 +1577,7 @@ module {
             switch (asset.last_certified_encoding) {
                 case (?encoding_name) {
                     let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err("Asset.http_request(): asset.last_certified_encoding not found in asset.encodings");
-                    return #ok(build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req));
+                    return (build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req, opt_fallback_key));
                 };
                 case (null) {};
             };
@@ -1554,12 +1586,12 @@ module {
         let ordered_encodings = encoding_order(encodings);
         label search_for_matching_encoding for (encoding_name in ordered_encodings.vals()) {
             let ?encoding = Map.get(asset.encodings, thash, encoding_name) else continue search_for_matching_encoding;
-            return #ok(build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req));
+            return (build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req, opt_fallback_key));
         };
 
         label search_for_encoding_in_default_list for (encoding_name in ENCODING_CERTIFICATION_ORDER.vals()) {
             let ?encoding = Map.get(asset.encodings, thash, encoding_name) else continue search_for_encoding_in_default_list;
-            return #ok(build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req));
+            return (build_ok_response(self, path, asset, encoding_name, encoding, 0, etag_values, req, opt_fallback_key));
         };
 
         #err("No encoding found for " # debug_show url.path.original);

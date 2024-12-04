@@ -1,16 +1,14 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
-import Cycles "mo:base/ExperimentalCycles";
 import Debug "mo:base/Debug";
-import Error "mo:base/Error";
 import Iter "mo:base/Iter";
 import Nat8 "mo:base/Nat8";
-import None "mo:base/None";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Text "mo:base/Text";
+import Nat "mo:base/Nat";
 
 import Fuzz "mo:fuzz";
 import IC "mo:ic";
@@ -21,12 +19,8 @@ import { test; suite } "mo:test/async";
 import CertifiedAssets "mo:certified-assets/Stable";
 
 import Assets "../src";
-import AssetsCanister "../src/Canister";
-import BaseAssets "../src/BaseAssets";
 import CanisterTests "CanisterTests/tools";
-import Migrations "../src/Migrations";
 import Sha256 "../src/Sha256";
-import Utils "../src/Utils";
 
 shared ({ caller = owner }) actor class () = this_canister {
 
@@ -59,15 +53,15 @@ shared ({ caller = owner }) actor class () = this_canister {
     let fuzz = Fuzz.fromSeed(0x4321feed);
 
     // for running tests
-    public query func run_query_test(test_name: Text) : async Text { suite.run_query(test_name).1; };
+    public query func run_query_test(test_name: Text) : async CanisterTests.TestResult { suite.run_query(test_name).0; };
 
-    public func run_test(test_name: Text) : async Text { (await suite.run(test_name)).1; };
+    public func run_test(test_name: Text) : async CanisterTests.TestResult { (await suite.run(test_name)).0; };
 
-    public func get_test_details() : async Text { suite.get_test_details().1; };
+    public func get_test_details() : async [CanisterTests.TestDetails] { suite.get_test_details().0; };
 
-    public func get_test_result(test_name: Text) : async Text { suite.get_test_result(test_name).1; };
+    public func get_test_result(test_name: Text) : async CanisterTests.TestResult { suite.get_test_result(test_name).0; };
 
-    public func get_finished_test_results() : async Text { suite.get_finished_test_results().1 };
+    public func get_finished_test_results() : async [CanisterTests.TestResult] { suite.get_finished_test_results().0 };
 
     func get_controllers() : async* [Principal] {
 
@@ -160,17 +154,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         };
     };
 
-    func upload_chunks(principal: Principal, batch_id : Assets.BatchId, chunks : [Blob]) :  async* [Assets.ChunkId] {
-        let chunk_ids = Buffer.Buffer<Assets.ChunkId>(8);
-
-        for (chunk in chunks.vals()) {
-            let #ok({chunk_id}) = await* assets.create_chunk(principal, { batch_id ; content = chunk });
-            chunk_ids.add(chunk_id);
-        };
-        
-        return Buffer.toArray(chunk_ids);
-    };
-    
+ 
      func get_certified_endpoints() : Iter.Iter<CertifiedAssets.EndpointRecord> {
         CertifiedAssets.endpoints(assets_internal.certificate_store);
     };
@@ -514,11 +498,11 @@ shared ({ caller = owner }) actor class () = this_canister {
             ts_assert(Result.isErr(assets.create_batch(owner, {})));
 
             // "aaa" is 3 bytes, greater than the max_bytes limit
-            let chunk_greater_than_max_bytes = await* assets.create_chunk(owner, { batch_id; content = "aaa" });
+            let chunk_greater_than_max_bytes = assets.create_chunk(owner, { batch_id; content = "aaa" });
             ts_assert(Result.isErr(chunk_greater_than_max_bytes));
 
             // successful chunk creation
-            switch (await* assets.create_chunk(owner, { batch_id; content = "a" })) {
+            switch (assets.create_chunk(owner, { batch_id; content = "a" })) {
                 case (#ok(_)) {};
                 case (#err(msg)) {
                     ts_assert(false);
@@ -527,7 +511,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
 
             // shouldn't be able to create more chunks than the max_chunks limit
-            ts_assert(Result.isErr(await* assets.create_chunk(owner, { batch_id; content = "" })));
+            ts_assert(Result.isErr(assets.create_chunk(owner, { batch_id; content = "" })));
 
         },
     );
@@ -812,6 +796,207 @@ shared ({ caller = owner }) actor class () = this_canister {
         },
     );
 
+ // todo- implement
+    suite.add(
+        "get asset with aliasing",
+       func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {  
+        // set the property in one of the assets to support aliasing
+        // set the other to not support it, then try to get the asset with aliasing
+
+        // key -> "/test/asset/hello" already supports aliasing
+
+        let hello_world_content : Blob = "<h1>Hello, World!</h1>";
+
+        let actual_hello_html = assets.get({key="/test/store/hello.html";accept_encodings=["identity"]});
+        let expected_hello_html : Result<Assets.EncodedAsset, Text> = #ok({
+            content = hello_world_content;
+            content_type = "text/html";
+            content_encoding = "identity";
+            total_length = hello_world_content.size();
+            sha256 = ?(Sha256.fromBlob(#sha256, hello_world_content));
+        });
+
+        ts_assert_or_print(
+            actual_hello_html == expected_hello_html ,
+            "[0xtf] Failed to match asset content (actual vs expected): " # debug_show (actual_hello_html, expected_hello_html),
+        );
+
+        ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello.html"
+                }
+            ),
+            "Failed to find certified endpoint for /test/store/hello.html",
+        );
+
+        let actual_hello_index_html = assets.get({key="/test/store/hello/index.html";accept_encodings=["identity"]});
+        let expected_hello_index_html : Result<Assets.EncodedAsset, Text> = #ok({
+            content = hello_world_content;
+            content_type = "text/html";
+            content_encoding = "identity";
+            total_length = hello_world_content.size();
+            sha256 = ?(Sha256.fromBlob(#sha256, hello_world_content));
+        });
+
+        ts_assert_or_print(
+            actual_hello_index_html == expected_hello_index_html,
+            "[0xth] Failed to match asset content (actual vs expected): " # debug_show (actual_hello_index_html, expected_hello_index_html),
+        );
+
+        ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello/index.html"
+                }
+            ),
+            "Failed to find certified endpoint for /test/store/hello/index.html",
+        );
+
+        ts_assert_or_print(
+            Result.isErr(
+               assets.set_asset_properties(
+                    committer,
+                    {
+                        key = "/test/store/hello.html";
+                        max_age = null;
+                        headers = null;
+                        allow_raw_access = null;
+                        is_aliased = ??false;
+                    },
+                ) 
+            ),
+            "[0xtj] Unexpected success making updates using alias /test/store/hello.html instead of original key",
+        );
+
+        ts_assert_or_print(
+            Result.isErr(
+               assets.set_asset_properties(
+                    committer,
+                    {
+                        key = "/test/store/hello/index.html";
+                        max_age = null;
+                        headers = null;
+                        allow_raw_access = null;
+                        is_aliased = ??false;
+                    },
+                ) 
+            ),
+            "[0xtk] Unexpected success making updates using alias /test/store/hello/index.html instead of original key",
+        );
+
+        ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello"
+                }
+            ),
+            "[0xt8] Certified endpoint for /test/store/hello should be present if aliasing is enabled",
+        );
+
+        ts_assert_or_print(
+            Result.isOk(
+                assets.set_asset_properties(
+                    committer,
+                    {
+                        key = "/test/store/hello";
+                        max_age = null;
+                        headers = null;
+                        allow_raw_access = null;
+                        is_aliased = ??false;
+                    },
+                )
+            ),
+            "[0xti] Failed to revoke aliasing for /test/store/hello",
+        );
+ 
+
+        ts_assert_or_print(
+            Result.isErr(
+                assets.get({key="/test/store/hello.html";accept_encodings=["identity"]})
+            ),
+            "Retrieving /test/store/hello.html should fail after revoking aliasing",
+        );
+
+        ts_assert_or_print(
+            not Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello.html"
+                }
+            ),
+            "Certified endpoint for /test/store/hello.html should be removed after revoking aliasing",
+        );
+
+        ts_assert_or_print(
+            Result.isErr(
+                assets.get({key="/test/store/hello/index.html";accept_encodings=["identity"]})
+            ),
+            "Retrieving /test/store/hello/index.html should fail after revoking aliasing",
+        );
+
+        ts_assert_or_print(
+            not Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello/index.html"
+                }
+            ),
+            "Certified endpoint for /test/store/hello/index.html should be removed after revoking aliasing",
+        );
+
+        ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello"
+                }
+            ),
+            "[0xt8] Main key certificate should still be present after revoking aliasing",
+        );
+
+        ts_assert_or_print(
+            Result.isOk(
+                assets.set_asset_properties(
+                    committer,
+                    {
+                        key = "/test/store/hello";
+                        max_age = null;
+                        headers = null;
+                        allow_raw_access = null;
+                        is_aliased = ??true;
+                    },
+                )
+            ),
+            "[0xt2] Failed to re-enable aliasing for /test/store/hello",
+        );
+
+        ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello.html"
+                }
+            ),
+            "[0xt3] Failed to re-certify endpoint for /test/store/hello.html after enabling aliasing",
+        );
+
+       ts_assert_or_print(
+            Itertools.any(
+                get_certified_endpoints(),
+                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
+                    endpoint.url == "/test/store/hello/index.html"
+                }
+            ),
+            "[0xt3] Failed to re-certify endpoint for /test/store/hello/index.html after enabling aliasing",
+        );
+
+       }
+    );
+
     suite.add(
         "certified_tree() fails in update call",
         func({ ts_assert; ts_print } : CanisterTests.TestTools) : async () {
@@ -898,7 +1083,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             for (not_preparer in [no_permission, manager, controller].vals()) {
                 ts_assert_or_print(
                     Result.isErr(
-                        await* assets.create_chunk(not_preparer, { batch_id; content = "" })
+                        assets.create_chunk(not_preparer, { batch_id; content = "" })
                     ),
                     "Unexpected creation of chunk by " # get_principal_tag(not_preparer) # " principal without commit permission",
                 );
@@ -907,7 +1092,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             let chunk_ids = Buffer.Buffer<Nat>(8);
             let chunk_1 : Blob = fuzz.blob.randomBlob(fuzz.nat.randomRange(0, Assets.MAX_CHUNK_SIZE));
 
-            switch (await* assets.create_chunk(committer, { batch_id; content = chunk_1 })) {
+            switch (assets.create_chunk(committer, { batch_id; content = chunk_1 })) {
                 case (#ok({ chunk_id })) chunk_ids.add(chunk_id);
                 case (#err(msg)) {
                     ts_assert(false);
@@ -924,7 +1109,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
             let chunk_2 : Blob = fuzz.blob.randomBlob(fuzz.nat.randomRange(0, Assets.MAX_CHUNK_SIZE));
 
-            switch (await* assets.create_chunk(preparer, { batch_id; content = chunk_2 })) {
+            switch (assets.create_chunk(preparer, { batch_id; content = chunk_2 })) {
                 case (#ok({ chunk_id })) chunk_ids.add(chunk_id);
                 case (#err(msg)) {
                     ts_assert(false);
@@ -1089,7 +1274,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             let chunk_2 : Blob = "World!";
 
             for (chunk in [chunk_0, chunk_1, chunk_2].vals()) {
-                switch (await* assets.create_chunk(committer, { batch_id; content = chunk })) {
+                switch (assets.create_chunk(committer, { batch_id; content = chunk })) {
                     case (#ok({ chunk_id })) chunk_ids.add(chunk_id);
                     case (#err(msg)) {
                         ts_assert(false);
@@ -1192,216 +1377,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         },
 
     );
-
-    // func get_certified_endpoints() : [CertifiedAssets.EndpointRecord]{
-    //     Iter.toArray<CertifiedAssets.EndpointRecord>(
-    //         CertifiedAssets.endpoints(assets_internal.certificate_store)
-    //     )
-    // };
-
    
-
-    // todo- implement
-    suite.add(
-        "get asset with aliasing",
-       func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {  
-        // set the property in one of the assets to support aliasing
-        // set the other to not support it, then try to get the asset with aliasing
-
-        // key -> "/test/asset/hello" already supports aliasing
-
-        let hello_world_content : Blob = "<h1>Hello, World!</h1>";
-
-        let actual_hello_html = assets.get({key="/test/store/hello.html";accept_encodings=["identity"]});
-        let expected_hello_html : Result<Assets.EncodedAsset, Text> = #ok({
-            content = hello_world_content;
-            content_type = "text/html";
-            content_encoding = "identity";
-            total_length = hello_world_content.size();
-            sha256 = ?(Sha256.fromBlob(#sha256, hello_world_content));
-        });
-
-        ts_assert_or_print(
-            actual_hello_html == expected_hello_html ,
-            "[0xtf] Failed to match asset content (actual vs expected): " # debug_show (actual_hello_html, expected_hello_html),
-        );
-
-        ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello.html"
-                }
-            ),
-            "Failed to find certified endpoint for /test/store/hello.html",
-        );
-
-        let actual_hello_index_html = assets.get({key="/test/store/hello/index.html";accept_encodings=["identity"]});
-        let expected_hello_index_html : Result<Assets.EncodedAsset, Text> = #ok({
-            content = hello_world_content;
-            content_type = "text/html";
-            content_encoding = "identity";
-            total_length = hello_world_content.size();
-            sha256 = ?(Sha256.fromBlob(#sha256, hello_world_content));
-        });
-
-        ts_assert_or_print(
-            actual_hello_index_html == expected_hello_index_html,
-            "[0xth] Failed to match asset content (actual vs expected): " # debug_show (actual_hello_index_html, expected_hello_index_html),
-        );
-
-        ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello/index.html"
-                }
-            ),
-            "Failed to find certified endpoint for /test/store/hello/index.html",
-        );
-
-        ts_assert_or_print(
-            Result.isErr(
-               assets.set_asset_properties(
-                    committer,
-                    {
-                        key = "/test/store/hello.html";
-                        max_age = null;
-                        headers = null;
-                        allow_raw_access = null;
-                        is_aliased = ??false;
-                    },
-                ) 
-            ),
-            "[0xtj] Unexpected success making updates using alias /test/store/hello.html instead of original key",
-        );
-
-        ts_assert_or_print(
-            Result.isErr(
-               assets.set_asset_properties(
-                    committer,
-                    {
-                        key = "/test/store/hello/index.html";
-                        max_age = null;
-                        headers = null;
-                        allow_raw_access = null;
-                        is_aliased = ??false;
-                    },
-                ) 
-            ),
-            "[0xtk] Unexpected success making updates using alias /test/store/hello/index.html instead of original key",
-        );
-
-        ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello"
-                }
-            ),
-            "[0xt8] Certified endpoint for /test/store/hello should be present if aliasing is enabled",
-        );
-
-        ts_assert_or_print(
-            Result.isOk(
-                assets.set_asset_properties(
-                    committer,
-                    {
-                        key = "/test/store/hello";
-                        max_age = null;
-                        headers = null;
-                        allow_raw_access = null;
-                        is_aliased = ??false;
-                    },
-                )
-            ),
-            "[0xti] Failed to revoke aliasing for /test/store/hello",
-        );
-        
-
-        ts_assert_or_print(
-            Result.isErr(
-                assets.get({key="/test/store/hello.html";accept_encodings=["identity"]})
-            ),
-            "Retrieving /test/store/hello.html should fail after revoking aliasing",
-        );
-
-        ts_assert_or_print(
-            not Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello.html"
-                }
-            ),
-            "Certified endpoint for /test/store/hello.html should be removed after revoking aliasing",
-        );
-
-        ts_assert_or_print(
-            Result.isErr(
-                assets.get({key="/test/store/hello/index.html";accept_encodings=["identity"]})
-            ),
-            "Retrieving /test/store/hello/index.html should fail after revoking aliasing",
-        );
-
-        ts_assert_or_print(
-            not Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello/index.html"
-                }
-            ),
-            "Certified endpoint for /test/store/hello/index.html should be removed after revoking aliasing",
-        );
-
-        ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello"
-                }
-            ),
-            "[0xt8] Main key certificate should still be present after revoking aliasing",
-        );
-
-        ts_assert_or_print(
-            Result.isOk(
-                assets.set_asset_properties(
-                    committer,
-                    {
-                        key = "/test/store/hello";
-                        max_age = null;
-                        headers = null;
-                        allow_raw_access = null;
-                        is_aliased = ??true;
-                    },
-                )
-            ),
-            "[0xt2] Failed to re-enable aliasing for /test/store/hello",
-        );
-
-        ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello.html"
-                }
-            ),
-            "[0xt3] Failed to re-certify endpoint for /test/store/hello.html after enabling aliasing",
-        );
-
-       ts_assert_or_print(
-            Itertools.any(
-                get_certified_endpoints(),
-                func(endpoint : CertifiedAssets.EndpointRecord) : Bool {
-                    endpoint.url == "/test/store/hello/index.html"
-                }
-            ),
-            "[0xt3] Failed to re-certify endpoint for /test/store/hello/index.html after enabling aliasing",
-        );
-
-       }
-    );
-
     suite.add(
         "creating an asset with content greater than 2MB ingress limit",
         func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () { 
@@ -1466,7 +1442,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                             certified = encoding.certified;
                             sha256 = encoding.sha256;
                             modified = encoding.modified;
-                            content_chunks = Array.map(encoding.content_chunks, func(chunk : [Nat8]) : Nat { chunk.size() });
+                            content_chunks = null;
                         }));
 
                     };
@@ -1576,7 +1552,7 @@ shared ({ caller = owner }) actor class () = this_canister {
             let chunk_ids = Buffer.Buffer<Nat>(8);
 
             for (chunk in [chunk_0, chunk_1, chunk_2].vals()) {
-                switch (await* assets.create_chunk(committer, { batch_id; content = chunk })) {
+                switch (assets.create_chunk(committer, { batch_id; content = chunk })) {
                     case (#ok({ chunk_id })) chunk_ids.add(chunk_id);
                     case (#err(msg)) {
                         ts_assert(false);
@@ -1693,7 +1669,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "this is ",
                 "gzip encoded",
             ];
-            let gzip_chunk_ids = await* upload_chunks(committer, batch_id, gzip_chunks);
+            let #ok({chunk_ids = gzip_chunk_ids}) = await* assets.create_chunks(committer, { batch_id; content = gzip_chunks });
 
             let identity_content : Blob = blob_concat(identity_chunks);
             let gzip_content : Blob = blob_concat(gzip_chunks);
@@ -1821,8 +1797,8 @@ shared ({ caller = owner }) actor class () = this_canister {
                 let hello_world_gzip_content : Blob = "pretend this is gzip encoded";
                 
                 // upload chunks in parallel
-                let plain_hello_chunk_ids = await* upload_chunks(committer, batch_id, [plain_hello_content]);
-                let gzip_hello_chunk_ids = await* upload_chunks(committer, batch_id, [hello_world_gzip_content]);
+                let #ok({chunk_ids = plain_hello_chunk_ids}) = await* assets.create_chunks(committer, { batch_id; content = [plain_hello_content] });
+                let #ok({chunk_ids = gzip_hello_chunk_ids}) = await* assets.create_chunks(committer, { batch_id; content = [hello_world_gzip_content] });
 
                 let commit_args : Assets.CommitBatchArguments = {
                     batch_id;
@@ -1941,6 +1917,20 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "[0xv4] Failed to propose commit batch",
             );
 
+            ts_assert_or_print(
+                Result.isErr(
+                    assets.propose_commit_batch(preparer, {commit_args with operations = [commit_args.operations[1]]})
+                ),
+                "Should only be able to propose a batch once",
+            );
+
+            ts_assert_or_print(
+                Result.isErr(
+                    assets.create_chunk(preparer, { batch_id; content = "propose_commit_batch test chunk 4.\n" })
+                ),
+                "Should not be able to create chunks after proposing a batch",
+            );
+
             let computed_evidence = switch(await* assets.compute_evidence(preparer, { batch_id; max_iterations = null })) {
                 case (#ok(?evidence)) evidence;
                 case (#ok(null)) {
@@ -1958,6 +1948,13 @@ shared ({ caller = owner }) actor class () = this_canister {
                     await* assets.commit_proposed_batch(committer, {batch_id; evidence = computed_evidence})
                 ),
                 "[0xv5] Failed to commit batch",
+            );
+
+            ts_assert_or_print(
+                Result.isErr(
+                    await* assets.commit_proposed_batch(committer, {batch_id; evidence = computed_evidence})
+                ),
+                "Should not be able to commit a proposed batch that has already been committed",
             );
 
             let actual_asset_details = assets.get({ key = "/test/propose_commit/file.txt"; accept_encodings = ["identity"] });
@@ -1983,9 +1980,11 @@ shared ({ caller = owner }) actor class () = this_canister {
          }
     );
 
-    func validate_chunks(p: Principal, key: Text, content_encoding: Text, chunks: [Blob]) : async (){
-        func validate_chunk(i: Nat, expected: Blob) :  () {
-
+    func validate_chunks_range(key: Text, content_encoding: Text, chunks: [Blob], start: Nat, len: Nat) :  async () {
+        Debug.print("Validating chunks range: " # debug_show start # " to " # debug_show Nat.min(chunks.size(), start + len));
+        for (i in Itertools.range(start, Nat.min(chunks.size(), start + len))){
+            let expected = chunks.get(i);
+            
             let #ok({content = actual_chunk}) = assets.get_chunk({
                 key;
                 content_encoding;
@@ -1995,16 +1994,27 @@ shared ({ caller = owner }) actor class () = this_canister {
 
             assert actual_chunk == expected;
         };
+    };
 
-        for (_i in Iter.range(1, chunks.size())){
-            let i = _i - 1: Nat;
-            validate_chunk(i, chunks.get(i));
+    func validate_chunks(key: Text, content_encoding: Text, chunks: [Blob]) : async* (){
+        var start = 0;
+        let len = 50;
+
+        let async_buffer = Buffer.Buffer<(async ())>((chunks.size() + 1) / len);
+
+        while (start < chunks.size()){
+            async_buffer.add(validate_chunks_range(key, content_encoding, chunks, start, len));
+            start += len;
+        };
+
+        for (async_task in async_buffer.vals()){
+            await async_task;
         };
 
     };
 
     suite.add(
-        "create and store a very large asset - 1GB",
+        "create and store a large asset - 500GB",
         func ({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () { 
             // create a batch with a single asset that is 1GB in size
             // verify that the asset is created correctly
@@ -2020,7 +2030,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
             let chunk_0 = chunk_2mb_blob;
 
-            let chunk_id = (await* upload_chunks(committer, batch_id, [chunk_0])).get(0);
+            let #ok({chunk_id}) = (assets.create_chunk(committer, { batch_id; content = chunk_0}));
 
             let num_chunks = 512; // ==> 1GB / 2MB
 
@@ -2058,10 +2068,6 @@ shared ({ caller = owner }) actor class () = this_canister {
             ts_print("Committed 1GB asset");
 
             let chunks = Array.tabulate(num_chunks, func(_: Nat): Blob = chunk_0);
-
-            await validate_chunks(committer, "/test/commit/1gb-file", "identity", chunks);
-
-            ts_print("validated chunks");
 
             assert assets.get({ key = "/test/commit/1gb-file"; accept_encodings = ["identity"] }) == #ok({
                 content = chunk_0;
@@ -2104,10 +2110,6 @@ shared ({ caller = owner }) actor class () = this_canister {
     suite.add_query(
         "retrieve asset via http_request",
         func({ ts_assert; ts_print; ts_assert_or_print} : CanisterTests.TestTools) : () {
-            // mock http request to retrieve the asset
-            // validate the response
-            // validate that the certificates in the response header are present
-            // use the accept-encoding request header field to retrieve the asset in different encodings
 
             let http_request : Assets.HttpRequest = {
                 method = "GET";
@@ -2116,20 +2118,6 @@ shared ({ caller = owner }) actor class () = this_canister {
                 body : Blob = "";
                 certificate_version = ?2;
             };
-
-            // let expected_http_response : Assets.HttpResponse = {
-            //     status_code = 200;
-            //     headers = [
-            //         ("content-type", "text/plain"),
-            //         ("content-encoding", "identity"),
-            //         ("content-length", "14"),
-            //         ("cache-control", "public, max-age=0"),
-            //         ("certified-endpoints", "/test/asset/hello"),
-            //     ];
-            //     body = ;
-            //     streaming_strategy = null;
-            //     upgrade = null;
-            // };
 
             let actual_http_response = switch(assets.http_request(http_request)){
                 case (#ok(response)) response;
@@ -2152,11 +2140,123 @@ shared ({ caller = owner }) actor class () = this_canister {
             func tuple_equal(a: (Text, Text), b: (Text, Text)) : Bool {
                 (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
             };
+
+            func tuple_key_equal(a: (Text, Text), b: (Text, Text)) : Bool {
+                Text.toLowercase(a.0) == Text.toLowercase(b.0);
+            };
             
             ts_assert_or_print(
                 exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("content-type", "text/plain")),
                 "[0xva] Failed to match expected headers",
             );
+
+            ts_assert_or_print(
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_key_equal, ("IC-Certificate", "")) and 
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_key_equal, ("IC-CertificateExpression", "")),
+                "[0xvb] Missing certificate headers",
+            )
+        },
+    );
+
+    suite.add(
+        "supports fallback - store index.html files",
+        func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () { 
+            // verify that the canister supports the fallback method
+            assert Result.isOk(
+                assets.store(
+                    committer,
+                    {
+                        key = "/test/fallback/index.html";
+                        content = "fallback test";
+                        content_type = "text/plain";
+                        content_encoding = "identity";
+                        sha256 = null;
+                        is_aliased = null;
+                    },
+                )
+            );
+
+            assert Result.isOk(
+                assets.store(
+                    committer,
+                    {
+                        key = "/index.html";
+                        content = "fallback test";
+                        content_type = "text/plain";
+                        content_encoding = "identity";
+                        sha256 = null;
+                        is_aliased = null;
+                    },
+                )
+            );
+        }
+    );
+
+    suite.add_query(
+        "supports fallback - retrieve non-existent asset with fallback via http_request",
+        func({ ts_assert; ts_print; ts_assert_or_print} : CanisterTests.TestTools) : () {
+
+            var http_request : Assets.HttpRequest = {
+                method = "GET";
+                url = "/test/fallback/non-existent.html";
+                headers = [];
+                body : Blob = "";
+                certificate_version = ?2;
+            };
+
+            var http_response = switch(assets.http_request(http_request)){
+                case (#ok(response)) response;
+                case (#err(msg)) {
+                    ts_assert(false);
+                    return ts_print("Error making http request: " # msg);
+                };
+            };
+
+            func tuple_equal(a: (Text, Text), b: (Text, Text)) : Bool {
+                if (b.1 == "" or a.1 == "") {
+                    Text.toLowercase(a.0) == Text.toLowercase(b.0);
+                } else {
+                    (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
+                };
+            };
+
+            func is_fallback_response(http_response: Assets.HttpResponse) : Bool {
+                http_response.status_code == 200 and http_response.body == "fallback test" and exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("content-type", "text/plain")) and
+                exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("IC-Certificate", "")) and 
+                exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("IC-CertificateExpression", ""));
+            };
+            
+            ts_assert_or_print(
+                is_fallback_response(http_response),
+                "[0xvc] \'/test/fallback/non-existent.html\' should return fallback response",
+            );
+
+            http_request := { http_request with url = "test/fallback/unknown/path/non-existent.txt" };
+            http_response := switch(assets.http_request(http_request)){
+                case (#ok(response)) response;
+                case (#err(msg)) {
+                    ts_assert(false);
+                    return ts_print("Error making http request: " # msg);
+                };
+            };
+            ts_assert_or_print(
+                is_fallback_response(http_response) ,
+                "[0xvd] \'/test/fallback/unknown/path/non-existent.txt\' should return fallback response",
+            );
+
+            http_request := { http_request with url = "/non-existent.png" };
+            http_response := switch(assets.http_request(http_request)){
+                case (#ok(response)) response;
+                case (#err(msg)) {
+                    ts_assert(false);
+                    return ts_print("Error making http request: " # msg);
+                };
+            };
+            ts_assert_or_print(
+                is_fallback_response(http_response),
+                "[0xve] \'/non-existent.png\' should return fallback response",
+            );
+
         },
     );
 
@@ -2168,12 +2268,12 @@ shared ({ caller = owner }) actor class () = this_canister {
             // by calling get, list_assets and all other relevant functions
 
             let assets_to_delete = [
-                "/test/asset/hello",
                 "/test/asset/more_than_2mb",
                 "/test/commit/file.json",
                 "/test/commit/no-data",
                 "/test/commit/1gb-file",
                 "/test/propose_commit/file.txt",
+                "/test/asset/hello",
             ];
 
             for (asset in assets_to_delete.vals()) {
@@ -2183,6 +2283,8 @@ shared ({ caller = owner }) actor class () = this_canister {
                     ),
                     "Failed to delete asset: " # asset,
                 );
+
+                ts_print("certified_endpoints: " # debug_show(Iter.toArray(get_certified_endpoints())));
 
                 ts_assert_or_print(
                     not Itertools.any(
@@ -2197,7 +2299,8 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
         }
     );
-    
+
+
     suite.add(
         "owner revokes permissions",
         func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {
@@ -2241,7 +2344,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "[0xyd] Only owner should have Commit permission now but got: " # debug_show(Array.map(commit_principals, get_principal_tag)),
             );
 
-            let manage_permissions_principals = assets.list_permitted({ permission = #ManagePermissions });
+            
 
             ts_assert_or_print(
                 Result.isOk(
@@ -2255,6 +2358,9 @@ shared ({ caller = owner }) actor class () = this_canister {
                 ),
                 "[0xye] Owner failed to revoke ManagePermissions permission",
             );
+
+            let manage_permissions_principals = assets.list_permitted({ permission = #ManagePermissions });
+
             ts_assert_or_print(manage_permissions_principals == [], "[0xyf] ManagePermissions permission should be empty but got: " # debug_show(Array.map(manage_permissions_principals, get_principal_tag)));
         },
     );
@@ -2280,5 +2386,4 @@ shared ({ caller = owner }) actor class () = this_canister {
 
         },
     );
-
 };

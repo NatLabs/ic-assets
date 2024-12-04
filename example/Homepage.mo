@@ -18,7 +18,7 @@ module {
                     <span> - [" # file.content_type # "]      </span>
                     <span> -  <b>" # debug_show (encoding.length) # "</b> Bytes      </span>
                     " # (
-                    if (file.key == "/homepage" or file.key == "/404.html") {
+                    if (file.key == "/homepage" or file.key == "/fallback/index.html") {
                         "<button disabled>Delete</button>";
                     } else { "<button>Delete</button>" }
                 ) # "
