@@ -357,6 +357,22 @@ module {
         #ok(config);
     };
 
+    public func recertify(self : StableStore, caller : Principal, key : Text) : Result<(), Text> {
+        switch (AssetUtils.can_commit(self, caller)) {
+            case (#ok(_)) {};
+            case (#err(msg)) return #err(msg);
+        };
+
+        switch (AssetUtils.exists(self, key)) {
+            case (false) return #err("Asset does not exist");
+            case (true) {};
+        };
+
+        AssetUtils.recertify(self, key);
+
+        #ok();
+    };
+
     public func configure(self : StableStore, caller : Principal, args : T.ConfigureArguments) : Result<(), Text> {
         switch (AssetUtils.can_commit(self, caller)) {
             case (#ok(_)) {};

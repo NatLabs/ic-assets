@@ -39,7 +39,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
     let canister_id = Principal.fromActor(this_canister);
     stable var assets_sstore = Assets.init_stable_store(canister_id, owner);
-    stable let assets_sstore_2 = Assets.upgrade(assets_sstore_clone);
+    stable let assets_sstore_2 = Assets.upgrade(assets_sstore);
 
     let assets = Assets.Assets(assets_sstore_2);
 
@@ -62,6 +62,17 @@ shared ({ caller = owner }) actor class () = this_canister {
         await* certify_fallback_page();
         await* update_homepage();
         Debug.print("Re-Certified 404 page and updated homepage");
+    };
+
+    public func recertify() : async () {
+        for (file in assets.list({}).vals()) {
+            switch (assets.recertify(owner, file.key)) {
+                case (#ok()) {};
+                case (#err(msg)) {
+                    Debug.print("Error: " # msg);
+                };
+            };
+        };
     };
 
     func create_batch() : (Assets.BatchId) {

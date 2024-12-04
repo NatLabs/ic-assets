@@ -428,6 +428,10 @@ module {
             BaseAssets.get_configuration(state, caller);
         };
 
+        public func recertify(caller : Principal, key : Text) : Result<(), Text> {
+            BaseAssets.recertify(state, caller, key);
+        };
+
         /// This method configures the `max_batches`, `max_chunks` and `max_bytes` limits for the assets.
         ///
         /// Callable by: Principals with [Commit](#permission-commit) permissions.

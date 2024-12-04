@@ -256,6 +256,16 @@ module {
         };
     };
 
+    public func recertify(self : StableStore, key : Text) {
+        let asset = switch (Map.get(self.assets, thash, key)) {
+            case (?asset) asset;
+            case (_) return;
+        };
+
+        remove_asset_certificates(self, key, asset, true);
+        certify_asset(self, key, asset, null);
+    };
+
     func remove_asset_certificates(self : StableStore, key : Text, asset : Assets, only_aliases : Bool) {
         for ((encoding_name, encoding) in Map.entries(asset.encodings)) {
             remove_encoding_certificate(self, key, asset, encoding_name, encoding, only_aliases);
@@ -359,9 +369,8 @@ module {
 
     };
 
-    public func exists(self : StableStore, _key : T.Key) : Bool {
-        let key = format_key(_key);
-        Map.has(self.assets, thash, key);
+    public func exists(self : StableStore, key : T.Key) : Bool {
+        Option.isSome(get_asset_using_aliases(self, key, false));
     };
 
     module ErrorMessages {
