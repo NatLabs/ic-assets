@@ -15,6 +15,7 @@ import Migrations "Migrations";
 import AssetUtils "AssetUtils";
 
 module {
+
     let { thash } = Map;
     type Result<T, E> = Result.Result<T, E>;
 

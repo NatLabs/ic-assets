@@ -52,7 +52,7 @@ module {
         sha256 : Blob;
     };
 
-    public type Assets = {
+    public type Asset = {
         var content_type : Text;
         encodings : Map<Text, AssetEncoding>;
         headers : Map<Text, Text>;
@@ -361,7 +361,7 @@ module {
 
         var canister_id : Principal;
         var streaming_callback : ?StreamingCallback;
-        assets : Map<Key, Assets>;
+        assets : Map<Key, Asset>;
         certificate_store : CertifiedAssets.StableStore;
 
         configuration : Configuration;
@@ -370,7 +370,7 @@ module {
         var next_chunk_id : ChunkId;
 
         batches : Map<BatchId, Batch>;
-        copy_on_write_batches : Map<BatchId, [(Text, ?Assets)]>; // for atomicity - if commit fails, revert to this
+        copy_on_write_batches : Map<BatchId, [(Text, ?Asset)]>; // for atomicity - if commit fails, revert to this
         var next_batch_id : BatchId;
 
         // permissions

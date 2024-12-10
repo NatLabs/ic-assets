@@ -65,8 +65,8 @@ module {
             </head>
             <body>
                 <div class=\"container\">
-                    <h1>Fallback Page</h1>
-                    <h2>Oops! Page not found.</h2>
+                    <h2>Fallback Page</h2>
+                    <h3>Oops! Page not found.</h3>
                     <p class=\"funny-message\" id=\"funnyMessage\"></p>
                     <a href=\"javascript:void(0);\" class=\"back-link\" onclick=\"window.location.href = window.location.origin + '/homepage' + window.location.search;\">Take me home!</a>
                 </div>
@@ -89,6 +89,8 @@ module {
                         let message = cookie ? cookie.value : getRandomMessage();
                         document.getElementById(\"funnyMessage\").textContent = message;
                     });
+
+                    document.querySelector(\"h2\").textContent = `Oops! Could not find ${window.location.pathname} page.`;
 
                 </script>
             </body>

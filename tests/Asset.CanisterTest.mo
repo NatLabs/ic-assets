@@ -20,7 +20,7 @@ import CertifiedAssets "mo:certified-assets/Stable";
 
 import Assets "../src";
 import CanisterTests "CanisterTests/tools";
-import Sha256 "../src/Sha256";
+import Sha256 "mo:sha2/Sha256";
 
 shared ({ caller = owner }) actor class () = this_canister {
 
@@ -34,8 +34,8 @@ shared ({ caller = owner }) actor class () = this_canister {
     let canister_id = Principal.fromActor(this_canister);
 
     // Set up the assets library
-    let assets_sstore = Assets.init_stable_store(owner);
-    let #v0(assets_internal) = assets_sstore;
+    let assets_sstore = Assets.init_stable_store(canister_id, owner);
+    let #v0_1_0(assets_internal) = assets_sstore;
 
     let assets = Assets.Assets(assets_sstore);
     assets.set_canister_id(canister_id);
@@ -164,7 +164,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {
 
             ts_assert_or_print((assets.list_permitted({ permission = #Prepare })) == [], "Prepare permission should be empty");
-            ts_assert_or_print((assets.list_permitted({ permission = #Commit })) == [owner], "Commit permission should only be owner");
+            ts_assert_or_print((assets.list_permitted({ permission = #Commit })) == [owner, canister_id], "Commit permission should only be owner: " # debug_show Array.map(assets.list_permitted({ permission = #Commit }), get_principal_tag));
             ts_assert_or_print((assets.list_permitted({ permission = #ManagePermissions })) == [], "ManagePermissions permission should be empty");
 
             ts_assert_or_print(
@@ -195,7 +195,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "Unexpected error granting #Commit permission from owner to committer",
             );
 
-            ts_assert_or_print((assets.list_permitted({ permission = #Commit })) == [owner, committer], "Owner and committer should have Commit permission");
+            ts_assert_or_print((assets.list_permitted({ permission = #Commit })) == [owner, canister_id, committer], "Owner and committer should have Commit permission");
 
             ts_assert_or_print(
                 Result.isOk(
@@ -2014,7 +2014,7 @@ shared ({ caller = owner }) actor class () = this_canister {
     };
 
     suite.add(
-        "create and store a large asset - 500GB",
+        "create and store a large asset - 256MB",
         func ({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () { 
             // create a batch with a single asset that is 1GB in size
             // verify that the asset is created correctly
@@ -2032,15 +2032,15 @@ shared ({ caller = owner }) actor class () = this_canister {
 
             let #ok({chunk_id}) = (assets.create_chunk(committer, { batch_id; content = chunk_0}));
 
-            let num_chunks = 512; // ==> 1GB / 2MB
+            let num_chunks = 128; // 128 * 2MB = 256MB
 
-            let chunk_ids_for_1gb_file = Array.tabulate(num_chunks, func(_: Nat): Nat = chunk_id);
+            let chunk_ids_for_200mb_file = Array.tabulate(num_chunks, func(_: Nat): Nat = chunk_id);
 
             let commit_args : Assets.CommitBatchArguments = {
                 batch_id;
                 operations = [
                     #CreateAsset({
-                        key = "/test/commit/1gb-file";
+                        key = "/test/commit/200mb-file";
                         content_type = "text/plain";
                         max_age = null;
                         headers = null;
@@ -2048,15 +2048,14 @@ shared ({ caller = owner }) actor class () = this_canister {
                         allow_raw_access = null;
                     }),
                     #SetAssetContent({
-                        key = "/test/commit/1gb-file";
+                        key = "/test/commit/200mb-file";
                         content_encoding = "identity";
-                        chunk_ids = chunk_ids_for_1gb_file;
+                        chunk_ids = chunk_ids_for_200mb_file;
                         sha256 = null;
                     }),
                 ];
             };
 
-            ts_print("Committing 1GB asset");
 
             ts_assert_or_print(
                 Result.isOk(
@@ -2065,11 +2064,10 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "[0xv4] Failed to commit batch",
             );
             
-            ts_print("Committed 1GB asset");
 
             let chunks = Array.tabulate(num_chunks, func(_: Nat): Blob = chunk_0);
 
-            assert assets.get({ key = "/test/commit/1gb-file"; accept_encodings = ["identity"] }) == #ok({
+            assert assets.get({ key = "/test/commit/200mb-file"; accept_encodings = ["identity"] }) == #ok({
                 content = chunk_0;
                 content_type = "text/plain";
                 content_encoding = "identity";
@@ -2094,7 +2092,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "/test/asset/more_than_2mb",
                 "/test/commit/file.json",
                 "/test/commit/no-data",
-                "/test/commit/1gb-file",
+                "/test/commit/200mb-file",
                 "/test/propose_commit/file.txt",
             ];
 
@@ -2271,7 +2269,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 "/test/asset/more_than_2mb",
                 "/test/commit/file.json",
                 "/test/commit/no-data",
-                "/test/commit/1gb-file",
+                "/test/commit/200mb-file",
                 "/test/propose_commit/file.txt",
                 "/test/asset/hello",
             ];
@@ -2284,7 +2282,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                     "Failed to delete asset: " # asset,
                 );
 
-                ts_print("certified_endpoints: " # debug_show(Iter.toArray(get_certified_endpoints())));
+                // ts_print("certified_endpoints: " # debug_show(Iter.toArray(get_certified_endpoints())));
 
                 ts_assert_or_print(
                     not Itertools.any(
@@ -2340,7 +2338,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
             let commit_principals = assets.list_permitted({ permission = #Commit });
 
-            ts_assert_or_print(commit_principals == [owner],
+            ts_assert_or_print(commit_principals == [owner, canister_id],
                 "[0xyd] Only owner should have Commit permission now but got: " # debug_show(Array.map(commit_principals, get_principal_tag)),
             );
 

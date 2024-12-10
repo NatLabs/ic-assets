@@ -5,6 +5,7 @@ import Blob "mo:base/Blob";
 import Iter "mo:base/Iter";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
+import StableMemory "mo:base/ExperimentalStableMemory";
 
 import Set "mo:map/Set";
 import Map "mo:map/Map";
@@ -123,12 +124,12 @@ module {
 
     };
 
-    func upgrade_assets(assets : Map<Text, V0_types.Assets>) : Map<Text, V0_1_0_types.Assets> {
+    func upgrade_assets(assets : Map<Text, V0_types.Asset>) : Map<Text, V0_1_0_types.Asset> {
 
-        Map.fromIter<Text, V0_1_0_types.Assets>(
-            Iter.map<(Text, V0_types.Assets), (Text, V0_1_0_types.Assets)>(
+        Map.fromIter<Text, V0_1_0_types.Asset>(
+            Iter.map<(Text, V0_types.Asset), (Text, V0_1_0_types.Asset)>(
                 Map.entries(assets),
-                func((asset_id, asset) : (Text, V0_types.Assets)) : (Text, V0_1_0_types.Assets) {
+                func((asset_id, asset) : (Text, V0_types.Asset)) : (Text, V0_1_0_types.Asset) {
                     let new_asset = {
                         var content_type = asset.content_type;
                         headers = asset.headers;

@@ -67,7 +67,7 @@ module V0 {
         sha256 : Blob;
     };
 
-    public type Assets = {
+    public type Asset = {
         var content_type : Text;
         encodings : Map<Text, AssetEncoding>;
         headers : Map<Text, Text>;
@@ -332,7 +332,7 @@ module V0 {
 
         var canister_id : ?Principal;
         var streaming_callback : ?HttpTypes.StreamingCallback;
-        assets : Map<Key, Assets>;
+        assets : Map<Key, Asset>;
         certificate_store : CertifiedAssets.StableStore;
 
         configuration : Configuration;

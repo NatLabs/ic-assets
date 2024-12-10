@@ -31,7 +31,7 @@ suite(
             "ensure init_stable_store() returns the current version",
             func() {
 
-                let asset = Assets.init_stable_store(owner);
+                let asset = Assets.init_stable_store(canister_id, owner);
 
                 switch (asset) {
                     // current version
@@ -75,7 +75,7 @@ suite(
 
                 assert Map.size(v0_internal_asset.chunks) == 1;
 
-                ignore Map.put<Text, V0_types.Assets>(
+                ignore Map.put<Text, V0_types.Asset>(
                     v0_internal_asset.assets,
                     thash,
                     "/file.txt",
@@ -115,7 +115,7 @@ suite(
                 assert Map.size(internal_asset.batches) == 0;
                 assert Map.size(internal_asset.chunks) == 0;
 
-                let ?file_txt = Map.get<Text, V0_1_0_types.Assets>(internal_asset.assets, thash, "/file.txt") else return assert false;
+                let ?file_txt = Map.get<Text, V0_1_0_types.Asset>(internal_asset.assets, thash, "/file.txt") else return assert false;
 
                 assert file_txt.content_type == "text/plain";
                 assert file_txt.is_aliased == ?true;

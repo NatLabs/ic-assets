@@ -39,7 +39,7 @@ module {
     type Time = Time.Time;
     type Vector<A> = Vector.Vector<A>;
     type Order = Order.Order;
-    type Assets = T.Assets;
+    type Assets = T.Asset;
     type AssetEncoding = T.AssetEncoding;
     type Batch = T.Batch;
     type Key = T.Key;
@@ -170,7 +170,7 @@ module {
 
     public func certify_encoding(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text) : Result<(), Text> {
 
-        // Debug.print("Certify encoding called on " # asset_key # " with encoding " # encoding_name);
+        Debug.print("Certify encoding called on " # asset_key # " with encoding " # encoding_name);
 
         let ?encoding = Map.get(asset.encodings, thash, encoding_name) else return #err(ErrorMessages.encoding_not_found(asset_key, encoding_name));
 
@@ -178,7 +178,7 @@ module {
 
         let key_and_aliases = Itertools.add(aliases, asset_key);
 
-        // Debug.print("is_aliased: " # debug_show (asset.is_aliased));
+        // Debug.print("is_aliased: " # debug_show (asset.is_aliased, asset.is_aliased == ?true));
         // Debug.print("key_and_aliases: " # debug_show Iter.toArray(key_and_aliases));
 
         for (key_or_alias in key_and_aliases) {
@@ -188,9 +188,9 @@ module {
             let headers_array = Map.toArray(headers);
 
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
-            .response_headers(headers_array).status(200);
+            .response_headers(headers_array).status(200).is_fallback_path(asset.is_aliased == ?true);
 
-            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304);
+            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304).is_fallback_path(asset.is_aliased == ?true);
 
             CertifiedAssets.certify(self.certificate_store, success_endpoint);
             CertifiedAssets.certify(self.certificate_store, not_modified_endpoint);
@@ -203,24 +203,25 @@ module {
     };
 
     func remove_encoding_certificate(self : StableStore, asset_key : Text, asset : Assets, encoding_name : Text, encoding : T.AssetEncoding, only_aliases : Bool) {
+
         // verify that `only_aliases is set to true only if the asset is aliased
         // if not, then we are probably calling this function incorrectly
-        Debug.print(debug_show { asset_key; is_aliased = asset.is_aliased; only_aliases });
-        assert (asset.is_aliased != ?true and only_aliases == false) or asset.is_aliased == ?true;
+        // Debug.print(debug_show { asset_key; is_aliased = asset.is_aliased; only_aliases });
+        if (only_aliases) { assert asset.is_aliased == ?true };
 
         let aliases = if (asset.is_aliased == ?true) get_key_aliases(self, asset_key) else Itertools.empty();
         let keys = if (only_aliases) aliases else Itertools.add(aliases, asset_key);
 
         for (key_or_alias in keys) {
-            Debug.print("Removing certification for " # key_or_alias # " (alias of " # debug_show asset_key # ") with encoding " # encoding_name);
+            // Debug.print("Removing certification for " # key_or_alias # " (alias of " # debug_show asset_key # ") with encoding " # encoding_name);
 
             let headers = build_headers(asset, encoding_name, encoding.sha256);
             let headers_array = Map.toArray(headers);
 
             let success_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().hash(encoding.sha256) // the content's hash is inserted directly instead of computing it from the content
-            .response_headers(headers_array).status(200);
+            .response_headers(headers_array).status(200).is_fallback_path(asset.is_aliased == ?true);
 
-            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304);
+            let not_modified_endpoint = CertifiedAssets.Endpoint(key_or_alias, null).no_request_certification().response_headers(headers_array).status(304).is_fallback_path(asset.is_aliased == ?true);
 
             CertifiedAssets.remove(self.certificate_store, success_endpoint);
             CertifiedAssets.remove(self.certificate_store, not_modified_endpoint);
@@ -262,7 +263,7 @@ module {
             case (_) return;
         };
 
-        remove_asset_certificates(self, key, asset, true);
+        remove_asset_certificates(self, key, asset, false);
         certify_asset(self, key, asset, null);
     };
 
@@ -270,11 +271,17 @@ module {
         for ((encoding_name, encoding) in Map.entries(asset.encodings)) {
             remove_encoding_certificate(self, key, asset, encoding_name, encoding, only_aliases);
         };
+
+        if (not only_aliases) {
+            CertifiedAssets.remove_all(self.certificate_store, key);
+        };
     };
 
     func remove_encoding(self : StableStore, asset_key : Text, asset : Assets, content_encoding : Text) : Result<T.AssetEncoding, Text> {
-        let ?encoding = Map.remove(asset.encodings, thash, content_encoding) else return #err(ErrorMessages.encoding_not_found(asset_key, content_encoding));
+        let ?encoding = Map.get(asset.encodings, thash, content_encoding) else return #err(ErrorMessages.encoding_not_found(asset_key, content_encoding));
         remove_encoding_certificate(self, asset_key, asset, content_encoding, encoding, false);
+
+        ignore Map.remove(asset.encodings, thash, content_encoding);
 
         #ok(encoding);
     };
@@ -422,10 +429,9 @@ module {
             func(i : Nat) : T.AssetDetails {
                 let ?(asset_key, asset) = asset_entries.next() else Debug.trap("list(): Asset entry not found.");
 
-                let encodings = Array.tabulate(
-                    Map.size(asset.encodings),
-                    func(j : Nat) : T.AssetEncodingDetails {
-                        let ?(encoding_name, encoding) = Map.entries(asset.encodings).next() else Debug.trap("list(): Encoding entry not found.");
+                let encodings = Array.map(
+                    Map.toArray(asset.encodings),
+                    func((encoding_name, encoding) : (Text, T.AssetEncoding)) : T.AssetEncodingDetails {
 
                         let encoding_details : T.AssetEncodingDetails = {
                             content_encoding = encoding_name;
@@ -594,6 +600,13 @@ module {
         };
 
     };
+
+    // func check_if_prefix_exists_as_file(self : StableStore, key : Text) : Bool {
+    //     let key_with_html = key # ".html";
+    //     let key_with_index_html = key # "/index.html";
+
+    //     Map.has(self.assets, thash, key_with_html) or Map.has(self.assets, thash, key_with_index_html);
+    // };
 
     public func create_asset(self : StableStore, args : T.CreateAssetArguments) : Result<(), Text> {
         let key = format_key(args.key);
@@ -779,12 +792,13 @@ module {
         let ?asset = Map.get(self.assets, thash, key) else return #err(ErrorMessages.asset_not_found(key));
 
         let res = remove_encoding(self, key, asset, args.content_encoding);
+
         let #ok(_) = res else return Utils.send_error(res);
 
         #ok();
     };
 
-    func remove_asset(self : StableStore, key : Text) : Result<T.Assets, Text> {
+    func remove_asset(self : StableStore, key : Text) : Result<T.Asset, Text> {
 
         let ?asset = Map.remove(self.assets, thash, key) else return #err(ErrorMessages.asset_not_found(key));
         remove_asset_certificates(self, key, asset, false);
@@ -838,15 +852,16 @@ module {
 
         switch (asset.is_aliased, args.is_aliased) {
             case (?true, ??false or ?null) {
-                Debug.print("Removing aliases for " # key);
+                // Debug.print("Removing aliases for " # key);
                 // remove only aliases
                 remove_asset_certificates(self, key, asset, true);
 
                 // only revoke support for aliases after the certificates have been removed
                 asset.is_aliased := Option.get(args.is_aliased, ?false);
+                certify_asset(self, key, asset, null);
             };
             case (?false or null, ??true) {
-                Debug.print("Adding aliases for " # key);
+                // Debug.print("Adding aliases for " # key);
                 // needs to be updated first so certify_asset knows to certify for the aliases
                 asset.is_aliased := ?true;
                 certify_asset(self, key, asset, null);
@@ -1400,7 +1415,7 @@ module {
         // Debug.print("content (index, bytes): " # debug_show (chunk_index, content_chunk.size()));
         assert content_chunk.size() <= 2 * (1024 ** 2);
 
-        Debug.print("contains_hash: " # debug_show contains_hash);
+        // Debug.print("contains_hash: " # debug_show contains_hash);
 
         let (status_code, body, opt_body_hash) : (Nat16, Blob, ?Blob) = if (contains_hash) {
             (304, "", null);
@@ -1527,7 +1542,7 @@ module {
             let possible_fallback_prefix = Text.join(("/"), slice);
             let possible_fallback_key = possible_fallback_prefix # "/index.html";
 
-            switch (get_asset_using_aliases(self, possible_fallback_key, false)) {
+            switch (get_asset_using_aliases(self, possible_fallback_key, true)) {
                 case (?asset) return ?(possible_fallback_key, asset);
                 case (_) {};
             };

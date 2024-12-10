@@ -104,6 +104,7 @@ module {
         };
 
         AssetUtils.grant_permission(state, owner, #Commit);
+        AssetUtils.grant_permission(state, canister_id, #Commit);
 
         state;
     };

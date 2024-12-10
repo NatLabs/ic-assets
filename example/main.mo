@@ -27,6 +27,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
     type File = {
         content_type : Text;
+        content_encoding : Text;
         chunk_ids : Buffer.Buffer<Nat>;
         exists : Bool;
         var is_committed : Bool;
@@ -43,8 +44,6 @@ shared ({ caller = owner }) actor class () = this_canister {
 
     let assets = Assets.Assets(assets_sstore_2);
 
-    assets.set_canister_id(canister_id);
-
     public query func http_request_streaming_callback(token : Assets.StreamingToken) : async (Assets.StreamingCallbackResponse) {
         assets.http_request_streaming_callback(token);
     };
@@ -59,21 +58,27 @@ shared ({ caller = owner }) actor class () = this_canister {
     // > Warning: using the system timer will cause the Timer.mo library to not function properly.
     // using this method because post_upgrade doesn't work during init, or the first upgrade but only after the first upgrade
     system func timer(setGlobalTimer : Nat64 -> ()) : async () {
+        // Upload the fallback page and homepage assets
         await* certify_fallback_page();
         await* update_homepage();
-        Debug.print("Re-Certified 404 page and updated homepage");
     };
 
-    public func recertify() : async () {
+    func _recertify(caller : Principal) {
         for (file in assets.list({}).vals()) {
-            switch (assets.recertify(owner, file.key)) {
+            switch (assets.recertify(caller, file.key)) {
                 case (#ok()) {};
                 case (#err(msg)) {
-                    Debug.print("Error: " # msg);
+                    Debug.print("Error recertifying " # file.key # ": " # msg);
                 };
             };
         };
     };
+
+    public shared ({ caller }) func recertify() : async () {
+        _recertify(caller);
+    };
+
+    system func postupgrade() {};
 
     func create_batch() : (Assets.BatchId) {
         let #ok({ batch_id }) = assets.create_batch(owner, {});
@@ -93,7 +98,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         return Buffer.toArray(chunk_ids);
     };
 
-    func upload(batch_id : Nat, file_name : Text, content_type : Text, chunks : [Blob]) : async* () {
+    func upload(batch_id : Nat, file_name : Text, content_type : Text, content_encoding : Text, chunks : [Blob]) : async* () {
         let ?batch = Map.get(current_uploads, nhash, batch_id) else Debug.trap("Batch not found");
         let file = switch (Map.get(batch, thash, file_name)) {
             case (?file) file;
@@ -101,6 +106,7 @@ shared ({ caller = owner }) actor class () = this_canister {
 
                 let file : File = {
                     content_type;
+                    content_encoding;
                     chunk_ids = Buffer.Buffer<Nat>(8);
                     exists = assets.exists(file_name);
                     var is_committed = false;
@@ -139,7 +145,7 @@ shared ({ caller = owner }) actor class () = this_canister {
                 );
             };
 
-            operations.add(#SetAssetContent({ key = file_name; content_encoding = "identity"; chunk_ids = Buffer.toArray(chunk_ids); sha256 = null }));
+            operations.add(#SetAssetContent({ key = file_name; content_encoding = file.content_encoding; chunk_ids = Buffer.toArray(chunk_ids); sha256 = null }));
         };
 
         // Debug.print("Committing batch: " # debug_show batch_id);
@@ -162,7 +168,7 @@ shared ({ caller = owner }) actor class () = this_canister {
         let root = homepage(files);
 
         let batch_id = create_batch();
-        await* upload(batch_id, "/homepage", "text/html", [Text.encodeUtf8(root)]);
+        await* upload(batch_id, "/homepage", "text/html", "identity", [Text.encodeUtf8(root)]);
         await* commit_batch(batch_id);
     };
 
@@ -170,11 +176,13 @@ shared ({ caller = owner }) actor class () = this_canister {
         let _fallback_page = get_fallback_page();
 
         let batch_id = create_batch();
-        await* upload(batch_id, "/fallback/index.html", "text/html", [Text.encodeUtf8(_fallback_page)]);
+        await* upload(batch_id, "/fallback/index.html", "text/html", "identity", [Text.encodeUtf8(_fallback_page)]);
         await* commit_batch(batch_id);
     };
 
-    public composite query func http_request(request : Assets.HttpRequest) : async Assets.HttpResponse {
+    public composite query func http_request(_request : Assets.HttpRequest) : async Assets.HttpResponse {
+
+        var request = _request;
 
         if (request.method == "POST" or request.method == "PUT" or request.method == "DELETE") {
             return {
@@ -186,14 +194,21 @@ shared ({ caller = owner }) actor class () = this_canister {
             };
         };
 
+        let url = HttpParser.URL(_request.url, HttpParser.Headers([]));
+
+        request := switch (url.queryObj.get("content_encoding")) {
+            case (?content_encoding) {
+                {
+                    request with headers = Array.append(request.headers, [("Content-Encoding", content_encoding)])
+                };
+            };
+            case (null) request;
+        };
+
         switch (assets.http_request(request)) {
             case (#ok(response)) response;
             case (#err(error_message)) {
-                Debug.print("Error: " # error_message);
-                Debug.print(request.url);
-                if (Text.startsWith(request.url, #text("/favicon.ico"))) return response(200, "");
-
-                Assets.redirect_to(assets, request, "/404.html", [("Set-Cookie", "__ic_asset_motoko_lib_error__=" # error_message)]);
+                Debug.trap("Error: " # debug_show { url = request.url; error_message });
             };
         };
     };
@@ -242,12 +257,14 @@ shared ({ caller = owner }) actor class () = this_canister {
                     case (?file) file;
                     case (null) {
                         let ?content_type = url.queryObj.get("content-type");
-                        // Debug.print("Create new file: " # debug_show ({ batch_id; filename; content_type }));
+                        let ?content_encoding = url.queryObj.get("content-encoding");
                         let ?total_chunks_text = (url.queryObj.get("total_chunks"));
                         let total_chunks = nat_from_text(total_chunks_text);
+                        // Debug.print(debug_show ({ content_type; content_encoding; total_chunks; filename }));
 
                         let file : File = {
                             content_type;
+                            content_encoding;
                             chunk_ids = Buffer.fromArray<Nat>(
                                 Array.tabulate<Nat>(
                                     total_chunks,
@@ -299,12 +316,28 @@ shared ({ caller = owner }) actor class () = this_canister {
 
                 let ?key = url.queryObj.get("filename");
 
-                // Debug.print("deleting: " # debug_show key);
-                switch (assets.delete_asset(owner, { key })) {
-                    case (#ok()) {};
-                    case (#err(msg)) {
-                        Debug.print("Error: " # msg);
-                        return response(404, msg);
+                switch (url.queryObj.get("content_encoding")) {
+                    case (?content_encoding) {
+                        // Debug.print("Deleting asset content: " # debug_show { key; content_encoding });
+
+                        switch (assets.unset_asset_content(owner, { key; content_encoding })) {
+                            case (#ok()) {};
+                            case (#err(msg)) {
+                                Debug.print("Error: " # msg);
+                                return response(404, msg);
+                            };
+                        };
+                    };
+                    case (null) {
+                        // Debug.print("Deleting asset: " # debug_show key);
+                        switch (assets.delete_asset(owner, { key })) {
+                            case (#ok()) {};
+                            case (#err(msg)) {
+                                Debug.print("Error: " # msg);
+                                return response(404, msg);
+                            };
+                        };
+
                     };
                 };
 

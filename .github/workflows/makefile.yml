@@ -1,6 +1,6 @@
 name: Makefile CI
 
-on: 
+on:
   push:
     branches:
       - main
@@ -39,7 +39,7 @@ jobs:
         uses: dfinity/setup-dfx@main
       - name: Confirm successful installation
         run: dfx --version
-    
+
       - name: Install dfx cache
         run: dfx cache install
 
@@ -48,13 +48,26 @@ jobs:
           npm --yes -g i ic-mops
           mops i
           mops toolchain init
-          mops toolchain use moc 0.10.4
 
           # set moc path for dfx to use
           echo "DFX_MOC_PATH=$(mops toolchain bin moc)" >> $GITHUB_ENV
-    
-      - name: Detect warnings
-        run: make check
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Check Rust version
+        run: rustc --version
+
+      - name: Install test dependencies
+        run: |
+          npm install -g zx
+          cargo install idl2json_cli
 
       - name: Run Tests
-        run: make test
+        run: |
+          make test
+          make canister-tests

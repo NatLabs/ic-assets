@@ -1,20 +1,19 @@
 [package]
 name = "ic-assets"
 description = "A library implementation of the IC Assets Canister with v2 certification"
-version = "0.0.2"
+version = "0.1.0"
 repository = "https://github.com/NatLabs/ic-assets"
 license = "MIT"
-keywords = [ "certified", "http", "request", "streaming" ]
+keywords = ["certified", "http", "request", "streaming"]
 
 [dependencies]
-base = "0.13.4"
+base = "0.13.3"
 http-types = "1.0.1"
 map = "9.0.1"
-certified-assets = "../certified-assets"
+certified-assets = "0.4.0"
 ic = "2.0.0"
 itertools = "0.2.2"
 vector = "0.4.1"
-sha2-shared = "https://github.com/NatLabs/sha2#main@b3578003e29c4a297f01efc70eb295243d0e44fa"
 encoding = "https://github.com/aviate-labs/encoding.mo#v0.4.1@2711d18727e954b11afc0d37945608512b5fbce2"
 http-parser = "0.3.3"
 sha2 = "0.1.0"
