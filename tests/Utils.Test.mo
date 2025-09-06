@@ -1,32 +1,24 @@
-import Debug "mo:base/Debug";
-import Blob "mo:base/Blob";
-import Iter "mo:base/Iter";
-import Principal "mo:base/Principal";
-import Text "mo:base/Text";
-import Option "mo:base/Option";
-
-import { test; suite } "mo:test";
-import Sha256 "mo:sha2/Sha256";
-import Vector "mo:vector";
-import Map "mo:map/Map";
-import Set "mo:map/Set";
-import Itertools "mo:itertools/Iter";
-import MemoryRegion "mo:memory-region/MemoryRegion";
-
-import FileSystem "../src/BaseAssets/FileSystem";
-import Asset "../src/BaseAssets/FileSystem/Asset";
+import { test } "mo:test";
+import Debug "mo:base@0/Debug";
 import Utils "../src/BaseAssets/Utils";
 
 test(
-    "format key",
-    func() {
-
-        assert Utils.format_key("path/to/file") == "/path/to/file";
-        assert Utils.format_key("/path/to/file") == "/path/to/file";
-        assert Utils.format_key("path/to/file/") == "/path/to/file";
-        assert Utils.format_key("/path/to/file/") == "/path/to/file";
-        assert Utils.format_key("path/to/file//") == "/path/to/file";
-        assert Utils.format_key("/path/to/file//") == "/path/to/file";
-
-    },
+  "format key",
+  func() {
+    let testCases = [
+      ("path/to/file", "/path/to/file"),
+      ("/path/to/file", "/path/to/file"),
+      ("path/to/file/", "/path/to/file"),
+      ("/path/to/file/", "/path/to/file"),
+      ("path/to/file//", "/path/to/file"),
+      ("/path/to/file//", "/path/to/file"),
+    ];
+    for (testCase in testCases.vals()) {
+      let (input, expected) = testCase;
+      let result = Utils.format_key(input);
+      if (result != expected) {
+        Debug.trap("Test failed:\nInput\n" # input # "\nExpected\n" # expected # "\nActual\n" # result);
+      };
+    };
+  },
 );

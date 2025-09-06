@@ -1,5 +1,13 @@
 # Assets Library and Canister
 
+## Fork Information
+
+This repository is a fork of [ic-assets](https://github.com/NatLabs/ic-assets) created by [Tomijaga](https://github.com/tomijaga) under the [NatLabs](https://github.com/NatLabs) organization.
+
+The primary difference between this fork and the original repository is that we've published to a different package name in the mops.toml file. All core functionality remains the same, and we maintain the original MIT license.
+
+Our goal is to contribute improvements back to the original repository while maintaining our own package for specific use cases.
+
 ## Introduction
 
 A Motoko library implementation of the [Assets Canister](https://github.com/dfinity/sdk/blob/master/docs/design/asset-canister-interface.md) with v2 certification. It allows you to serve files from a canister and access them via the `<canister-id>.icp0.io` domain instead of the `<canister-id>.raw.ic0.io` domain.
@@ -31,10 +39,14 @@ This is the documentation for the assets canister implemented in Rust by the Dfi
         let canister_id  = Principal.fromActor(this_canister);
 
         stable let assets_sstore_1 = Assets.init_stable_store(canister_id, owner);
+        assets_sstore_1 := HttpAssets.upgrade_stable_store(assets_sstore_1);
         let assets = Assets.Assets(assets_sstore_1, null);
 
-        public query func http_request_streaming_callback(token : Assets.StreamingToken) : async ?(Assets.StreamingCallbackResponse) {
-            ?assets.http_request_streaming_callback(token);
+        public query func http_request_streaming_callback(token : Assets.StreamingToken) : async Assets.StreamingCallbackResponse {
+            switch (assetStore.http_request_streaming_callback(token)) {
+                case (#err(e)) throw Error.reject(e);
+                case (#ok(response)) response;
+            };
         };
 
         assets.set_streaming_callback(http_request_streaming_callback); // required

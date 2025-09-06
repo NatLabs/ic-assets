@@ -1,0 +1,419 @@
+import Array "mo:base@0/Array";
+import Blob "mo:base@0/Blob";
+import Buffer "mo:base@0/Buffer";
+import Debug "mo:base@0/Debug";
+import Iter "mo:base@0/Iter";
+import Nat8 "mo:base@0/Nat8";
+import Option "mo:base@0/Option";
+import Principal "mo:base@0/Principal";
+import Result "mo:base@0/Result";
+import Text "mo:base@0/Text";
+import Nat "mo:base@0/Nat";
+import Error "mo:base@0/Error";
+
+import Assets "../src";
+import FileSystem "../src/BaseAssets/FileSystem";
+import CanisterTests "CanisterTests/tools";
+
+shared ({ caller = owner }) actor class () = this_canister {
+
+    type Buffer<A> = Buffer.Buffer<A>;
+    type Result<A, B> = Result.Result<A, B>;
+
+    let { exists_in } = CanisterTests;
+    let canister_id = Principal.fromActor(this_canister);
+
+    // Set up the assets library
+    let assets_sstore = Assets.init_stable_store(canister_id, owner);
+    let #v1_0_0(assets_internal) = assets_sstore else Debug.trap("Failed to extract stable store state with version #v1_0_0");
+
+    let assets = Assets.Assets(assets_sstore, null);
+    assets.set_canister_id(canister_id);
+
+    public query func http_request_streaming_callback(
+        token : Assets.StreamingToken
+    ) : async Assets.StreamingCallbackResponse {
+        switch (assets.http_request_streaming_callback(token)) {
+            case (#ok(response)) response;
+            case (#err(msg)) throw Error.reject(msg);
+        };
+    };
+
+    assets.set_streaming_callback(http_request_streaming_callback);
+
+    // Set up test suite
+    let suite = CanisterTests.Suite();
+
+    // for running tests
+    public query func run_query_test(test_name : Text) : async CanisterTests.TestResult {
+        suite.run_query(test_name).0;
+    };
+
+    public func run_test(test_name : Text) : async CanisterTests.TestResult {
+        (await suite.run(test_name)).0;
+    };
+
+    public func get_test_details() : async [CanisterTests.TestDetails] {
+        suite.get_test_details().0;
+    };
+
+    public func get_test_result(test_name : Text) : async CanisterTests.TestResult {
+        suite.get_test_result(test_name).0;
+    };
+
+    public func get_finished_test_results() : async [CanisterTests.TestResult] {
+        suite.get_finished_test_results().0;
+    };
+
+    suite.add(
+        "store asset",
+        func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {
+            let store_args : Assets.StoreArgs = {
+                key = "/index.html";
+                content = "<h1>👋 Hello, World!</h1>";
+                sha256 = null;
+                content_type = "text/html";
+                content_encoding = "identity";
+                is_aliased = ?true;
+            };
+
+            let result = assets.store(owner, store_args);
+            ts_assert_or_print(
+                Result.isOk(result),
+                "[0xv1] Failed to store asset: " # debug_show result,
+            );
+        },
+    );
+
+    suite.add_query(
+        "retrieve asset via http_request",
+        func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : () {
+
+            let http_request : Assets.HttpRequest = {
+                method = "GET";
+                url = "/index.html";
+                headers = [];
+                body : Blob = "";
+                certificate_version = ?2;
+            };
+
+            let actual_http_response = switch (assets.http_request(http_request)) {
+                case (#ok(response)) response;
+                case (#err(msg)) {
+                    ts_assert(false);
+                    return ts_print("Error making http request: " # msg);
+                };
+            };
+            ts_print("Response Headers: " # debug_show actual_http_response.headers);
+
+            ts_assert_or_print(
+                actual_http_response.status_code == 200,
+                "[0xv8] Failed with status_code: " # debug_show actual_http_response.status_code,
+            );
+
+            ts_assert_or_print(
+                actual_http_response.body == "<h1>👋 Hello, World!</h1>",
+                "[0xv9] Failed to match asset content (actual vs expected): " # debug_show (actual_http_response.body, "<h1>👋 Hello, World!</h1>"),
+            );
+
+            func tuple_equal(a : (Text, Text), b : (Text, Text)) : Bool {
+                (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
+            };
+
+            ts_assert_or_print(
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("content-type", "text/html")),
+                "[0xva] Failed to match expected headers",
+            );
+
+            ts_assert_or_print(
+                exists_in<(Text, Text)>(
+                    actual_http_response.headers,
+                    func(a : (Text, Text), b : (Text, Text)) : Bool {
+                        if (a.0 != b.0) return false;
+
+                        let aParts = Text.split(a.1, #text(", "));
+                        let bParts = Text.split(b.1, #text(", "));
+                        for (aPart in aParts) {
+                            let ?bPart = bParts.next() else return false;
+                            let aPartParts = Text.split(aPart, #char('='));
+                            let bPartParts = Text.split(bPart, #char('='));
+                            let ?aKey = aPartParts.next() else return false;
+                            let ?bKey = bPartParts.next() else return false;
+                            if (aKey != bKey) return false;
+                            let ?aValue = aPartParts.next() else return false;
+                            let ?bValue = bPartParts.next() else return false;
+                            let isEqual = switch (aKey) {
+                                case ("certificate") true; // TODO?
+                                case (_) aValue == bValue; // TODO?
+                            };
+                            if (not isEqual) return false;
+                        };
+                        bParts.next() == null;
+                    },
+
+                    // 55799(["http_expr", "index.html", "<*>"])
+                    // 55799([
+                    //     1,
+                    //     [4, h'23D377FF05CD9E742BCDCA6549AD63DD2363B75BC4E8A0D44B0E256D37D1DFF7'],
+                    //     [2, 'http_expr', [
+                    //         2, 'index.html', [
+                    //         2, '<*>', [
+                    //             2, h'28CB05CC4B49C14278B46B0A73B8FAFA1173419FFD0292558A59947A25C87576', [
+                    //                 2, '', [
+                    //                     1, [2, h'B01D9C9A07B4E9C17BFDCC7D2046F5789C19FCD15336325D7B4D2AB8640AC381', [3, '']],
+                    //                     [4, h'4DB853E102A1DF4D59E6AA61D3F90DD2CD5138BC3FE55CC56307ED480B8A18FE']
+                    //                 ]
+                    //             ]
+                    //         ]
+                    //         ]
+                    //     ]]
+                    // ])
+                    ("ic-certificate", "certificate=:2dn3o2R0cmVlgwGDAYMBggRYICZ9EIuCUUnIiSJ/IgyiAROM5iHDHHw88XQRfnAVEQu3gwJIY2FuaXN0ZXKDAYMBgwGCBFggC81WVvO2v24+bYZU6kGe56a4qCAdGXwjyJzjwHPNXj2DAkr//////5AAAQEBgwGDAYMCTmNlcnRpZmllZF9kYXRhggNYIG5DY5UaCq/xLsPAVuhry6cF/cHpckPvRjqpHR7bDfn+ggRYIAVTgseGJmHHR7RGOko/9ylDBWyI+rfZPLNegKhrfoXfggRYIL4cb42iZ1K1yQ9z1hUUK6L+Nr4iaI9yAQ83hds7OpRyggRYIIopvf9IILrs5X9Ulx6u2cWhmlUeEVJZUFxFFzupJi0wggRYIBGxFJHBdTEBDNweV6AB/v6GCYF3LWkA+dgH51V3B1nlggRYIK7kkHYZgSgk5V6BEgmlPNdOdwGZPqnx3Eeucs4AMqShgwGCBFggZi8tvs8nRFxDbVxQAFg+J/9Ch2kcbiH/QXzEpskQrpODAkR0aW1lggNJpK/X+vHE6aAYaXNpZ25hdHVyZVgwsL0m+TQUChu+PbPYaIWyiA8AnnnPpdj7a15edpbvT1BFZyUwShGNPX7SprTCfyBBamRlbGVnYXRpb26iaXN1Ym5ldF9pZFgdZdJlxPHTbwTyBUUfPTpW4ETyWveKp8OhkShL6wJrY2VydGlmaWNhdGVZAgvZ2feiZHRyZWWDAYIEWCAuIC9rJ5F3V+5IkBqgL09OCPqkQtS1xVNr6+Gd4TOYmIMBgwGCBFgg7qZngcNt2+B/RuF44W3LRsKWXG6QQg2L6GdZgJ6Nb3+DAkZzdWJuZXSDAYMBgwGCBFggUH5rq/LKRKhmgj05wU04iOBJOCgIlyAi2Z0K7HthpXuDAlgdZdJlxPHTbwTyBUUfPTpW4ETyWveKp8OhkShL6wKDAYMCT2NhbmlzdGVyX3Jhbmdlc4IDWBvZ2feBgkr//////5AAAAEBSv//////n///AQGDAkpwdWJsaWNfa2V5ggNYhTCBgjAdBg0rBgEEAYLcfAUDAQIBBgwrBgEEAYLcfAUDAgEDYQCJ5ZVsVFq1htAzEBoM3J6xUmsngCpWCbjp6CuBiZwNko01YkQcmNehEaC4rWrznVMIaC6HWqwfSyRicrk9NXXlBWIza2Edy7c7JjG3TXrrs6+7WCDpeZEmj7fI9wQdipmCBFggVDnZegl0VhqlgUZeoIZw7y0oUJLSSCv5ce13AHbeqJOCBFggsNl5CVSSObTh+orNNvPC6vbAyHCJLq1lTsT7HZBs1ZeDAkR0aW1lggNJpK/X+vHE6aAYaXNpZ25hdHVyZVgwijVyr1LsglxAil8Hgse/f6TXjfP6u/SpOFhdYehFzqgTstziKgoQDIl+XVnLrua4:, tree=:2dn3gwGCBFggu46IV0UcxNfbswoAk0TaC2lO14nd7vM0idhLLj6g+DqDAklodHRwX2V4cHKDAYIEWCCgXbshCWjbyhJod1nlDZ0IyNByoCFem2lh0IK67mEa4YMCSmluZGV4Lmh0bWyDAkM8Kj6DAlggKMsFzEtJwUJ4tGsKc7j6+hFzQZ/9ApJVilmUeiXIdXaDAkCDAYMCWCCwHZyaB7TpwXv9zH0gRvV4nBn80VM2Ml17TSq4ZArDgYIDQIIEWCBNuFPhAqHfTVnmqmHT+Q3SzVE4vD/lXMVjB+1IC4oY/g:, version=2, expr_path=:2dn3g2lodHRwX2V4cHJqaW5kZXguaHRtbGM8Kj4:"),
+                ) and
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("IC-CertificateExpression", "default_certification ( ValidationArgs { certification: Certification { no_request_certification: Empty { }, response_certification: ResponseCertification { certified_response_headers: ResponseHeaderList { headers: [\"content-type\", \"content-encoding\", \"vary\", \"etag\"] } } } } )")),
+                "[0xvb] Missing certificate headers",
+            );
+        },
+    );
+
+    suite.add_query(
+        "retrieve asset via http_request fallback",
+        func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : () {
+
+            let http_request : Assets.HttpRequest = {
+                method = "GET";
+                url = "/";
+                headers = [];
+                body : Blob = "";
+                certificate_version = ?2;
+            };
+
+            let actual_http_response = switch (assets.http_request(http_request)) {
+                case (#ok(response)) response;
+                case (#err(msg)) {
+                    ts_assert(false);
+                    return ts_print("Error making http request: " # msg);
+                };
+            };
+            ts_print("Response Headers: " # debug_show actual_http_response.headers);
+
+            ts_assert_or_print(
+                actual_http_response.status_code == 200,
+                "[0xv8] Failed with status_code: " # debug_show actual_http_response.status_code,
+            );
+
+            ts_assert_or_print(
+                actual_http_response.body == "<h1>👋 Hello, World!</h1>",
+                "[0xv9] Failed to match asset content (actual vs expected): " # debug_show (actual_http_response.body, "<h1>👋 Hello, World!</h1>"),
+            );
+
+            func tuple_equal(a : (Text, Text), b : (Text, Text)) : Bool {
+                (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
+            };
+
+            ts_assert_or_print(
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("content-type", "text/html")),
+                "[0xva] Failed to match expected headers",
+            );
+
+            ts_assert_or_print(
+                exists_in<(Text, Text)>(
+                    actual_http_response.headers,
+                    func(a : (Text, Text), b : (Text, Text)) : Bool {
+                        if (a.0 != b.0) return false;
+
+                        let aParts = Text.split(a.1, #text(", "));
+                        let bParts = Text.split(b.1, #text(", "));
+                        for (aPart in aParts) {
+                            let ?bPart = bParts.next() else return false;
+                            let aPartParts = Text.split(aPart, #char('='));
+                            let bPartParts = Text.split(bPart, #char('='));
+                            let ?aKey = aPartParts.next() else return false;
+                            let ?bKey = bPartParts.next() else return false;
+                            if (aKey != bKey) return false;
+                            let ?aValue = aPartParts.next() else return false;
+                            let ?bValue = bPartParts.next() else return false;
+                            let isEqual = switch (aKey) {
+                                case ("certificate") true; // TODO?
+                                case (_) aValue == bValue; // TODO?
+                            };
+                            if (not isEqual) return false;
+                        };
+                        bParts.next() == null;
+                    },
+
+                    // 55799(["http_expr", "index.html", "<*>"])
+                    // 55799([
+                    //     1,
+                    //     [4, h'23D377FF05CD9E742BCDCA6549AD63DD2363B75BC4E8A0D44B0E256D37D1DFF7'],
+                    //     [2, 'http_expr', [
+                    //         2, 'index.html', [
+                    //         2, '<*>', [
+                    //             2, h'28CB05CC4B49C14278B46B0A73B8FAFA1173419FFD0292558A59947A25C87576', [
+                    //                 2, '', [
+                    //                     1, [2, h'B01D9C9A07B4E9C17BFDCC7D2046F5789C19FCD15336325D7B4D2AB8640AC381', [3, '']],
+                    //                     [4, h'4DB853E102A1DF4D59E6AA61D3F90DD2CD5138BC3FE55CC56307ED480B8A18FE']
+                    //                 ]
+                    //             ]
+                    //         ]
+                    //         ]
+                    //     ]]
+                    // ])
+                    ("ic-certificate", "certificate=:2dn3o2R0cmVlgwGDAYMBggRYICZ9EIuCUUnIiSJ/IgyiAROM5iHDHHw88XQRfnAVEQu3gwJIY2FuaXN0ZXKDAYMBgwGCBFggC81WVvO2v24+bYZU6kGe56a4qCAdGXwjyJzjwHPNXj2DAkr//////5AAAQEBgwGDAYMCTmNlcnRpZmllZF9kYXRhggNYIG5DY5UaCq/xLsPAVuhry6cF/cHpckPvRjqpHR7bDfn+ggRYIAVTgseGJmHHR7RGOko/9ylDBWyI+rfZPLNegKhrfoXfggRYIL4cb42iZ1K1yQ9z1hUUK6L+Nr4iaI9yAQ83hds7OpRyggRYIIopvf9IILrs5X9Ulx6u2cWhmlUeEVJZUFxFFzupJi0wggRYIBGxFJHBdTEBDNweV6AB/v6GCYF3LWkA+dgH51V3B1nlggRYIK7kkHYZgSgk5V6BEgmlPNdOdwGZPqnx3Eeucs4AMqShgwGCBFggZi8tvs8nRFxDbVxQAFg+J/9Ch2kcbiH/QXzEpskQrpODAkR0aW1lggNJpK/X+vHE6aAYaXNpZ25hdHVyZVgwsL0m+TQUChu+PbPYaIWyiA8AnnnPpdj7a15edpbvT1BFZyUwShGNPX7SprTCfyBBamRlbGVnYXRpb26iaXN1Ym5ldF9pZFgdZdJlxPHTbwTyBUUfPTpW4ETyWveKp8OhkShL6wJrY2VydGlmaWNhdGVZAgvZ2feiZHRyZWWDAYIEWCAuIC9rJ5F3V+5IkBqgL09OCPqkQtS1xVNr6+Gd4TOYmIMBgwGCBFgg7qZngcNt2+B/RuF44W3LRsKWXG6QQg2L6GdZgJ6Nb3+DAkZzdWJuZXSDAYMBgwGCBFggUH5rq/LKRKhmgj05wU04iOBJOCgIlyAi2Z0K7HthpXuDAlgdZdJlxPHTbwTyBUUfPTpW4ETyWveKp8OhkShL6wKDAYMCT2NhbmlzdGVyX3Jhbmdlc4IDWBvZ2feBgkr//////5AAAAEBSv//////n///AQGDAkpwdWJsaWNfa2V5ggNYhTCBgjAdBg0rBgEEAYLcfAUDAQIBBgwrBgEEAYLcfAUDAgEDYQCJ5ZVsVFq1htAzEBoM3J6xUmsngCpWCbjp6CuBiZwNko01YkQcmNehEaC4rWrznVMIaC6HWqwfSyRicrk9NXXlBWIza2Edy7c7JjG3TXrrs6+7WCDpeZEmj7fI9wQdipmCBFggVDnZegl0VhqlgUZeoIZw7y0oUJLSSCv5ce13AHbeqJOCBFggsNl5CVSSObTh+orNNvPC6vbAyHCJLq1lTsT7HZBs1ZeDAkR0aW1lggNJpK/X+vHE6aAYaXNpZ25hdHVyZVgwijVyr1LsglxAil8Hgse/f6TXjfP6u/SpOFhdYehFzqgTstziKgoQDIl+XVnLrua4:, tree=:2dn3gwGCBFggu46IV0UcxNfbswoAk0TaC2lO14nd7vM0idhLLj6g+DqDAklodHRwX2V4cHKDAYMCQIMCQzwqPoMCWCAoywXMS0nBQni0awpzuPr6EXNBn/0CklWKWZR6Jch1doMCQIMBgwJYILAdnJoHtOnBe/3MfSBG9XicGfzRUzYyXXtNKrhkCsOBggNAggRYIE24U+ECod9NWeaqYdP5DdLNUTi8P+VcxWMH7UgLihj+ggRYIPmZvQ+SQdBM72gg3YDXAIEb6//OMr896kXSUFyMUJGW:, version=2, expr_path=:2dn3g2lodHRwX2V4cHJgYzwqPg:"),
+                ) and
+                exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("IC-CertificateExpression", "default_certification ( ValidationArgs { certification: Certification { no_request_certification: Empty { }, response_certification: ResponseCertification { certified_response_headers: ResponseHeaderList { headers: [\"content-type\", \"content-encoding\", \"vary\", \"etag\"] } } } } )")),
+                "[0xvb] Missing certificate headers",
+            );
+        },
+    );
+
+    // suite.add_query(
+    //     "retrieve asset with ETAG via http_request",
+    //     func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : () {
+
+    //         let http_request : Assets.HttpRequest = {
+    //             method = "GET";
+    //             url = "/index.html";
+    //             headers = [("if-none-match", "\"ef5a220587f32079e57b1cfcd748d973918d0ef3759c88bb18adfafe25e81652\"")];
+    //             body : Blob = "";
+    //             certificate_version = ?2;
+    //         };
+
+    //         let actual_http_response = switch (assets.http_request(http_request)) {
+    //             case (#ok(response)) response;
+    //             case (#err(msg)) {
+    //                 ts_assert(false);
+    //                 return ts_print("Error making http request: " # msg);
+    //             };
+    //         };
+
+    //         ts_assert_or_print(
+    //             actual_http_response.status_code == 304,
+    //             "[0xv8] Failed with status_code: " # debug_show actual_http_response.status_code,
+    //         );
+
+    //         ts_assert_or_print(
+    //             actual_http_response.body == "",
+    //             "[0xv9] Failed to match asset content (actual vs expected): " # debug_show (actual_http_response.body, "<h1>👋 Hello, World!</h1>"),
+    //         );
+
+    //         func tuple_equal(a : (Text, Text), b : (Text, Text)) : Bool {
+    //             (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
+    //         };
+
+    //         ts_assert_or_print(
+    //             exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("content-type", "text/html")),
+    //             "[0xva] Failed to match expected headers",
+    //         );
+
+    //         ts_assert_or_print(
+    //             exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("IC-Certificate", "")) and
+    //             exists_in<(Text, Text)>(actual_http_response.headers, tuple_equal, ("IC-CertificateExpression", "")),
+    //             "[0xvb] Missing certificate headers",
+    //         );
+    //     },
+    // );
+
+    // suite.add(
+    //     "supports fallback - store index.html files",
+    //     func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : async () {
+    //         // verify that the canister supports the fallback method
+    //         assert Result.isOk(
+    //             assets.store(
+    //                 owner,
+    //                 {
+    //                     key = "/test/fallback/index.html";
+    //                     content = "fallback test";
+    //                     content_type = "text/plain";
+    //                     content_encoding = "identity";
+    //                     sha256 = null;
+    //                     is_aliased = null;
+    //                 },
+    //             )
+    //         );
+
+    //         assert Result.isOk(
+    //             assets.store(
+    //                 owner,
+    //                 {
+    //                     key = "/index.html";
+    //                     content = "fallback test";
+    //                     content_type = "text/plain";
+    //                     content_encoding = "identity";
+    //                     sha256 = null;
+    //                     is_aliased = null;
+    //                 },
+    //             )
+    //         );
+    //     },
+    // );
+
+    // suite.add_query(
+    //     "supports fallback - retrieve non-existent asset with fallback via http_request",
+    //     func({ ts_assert; ts_print; ts_assert_or_print } : CanisterTests.TestTools) : () {
+
+    //         var http_request : Assets.HttpRequest = {
+    //             method = "GET";
+    //             url = "/test/fallback/non-existent.html";
+    //             headers = [];
+    //             body : Blob = "";
+    //             certificate_version = ?2;
+    //         };
+
+    //         var http_response = switch (assets.http_request(http_request)) {
+    //             case (#ok(response)) response;
+    //             case (#err(msg)) {
+    //                 ts_assert(false);
+    //                 return ts_print("Error making http request: " # msg);
+    //             };
+    //         };
+
+    //         func tuple_equal(a : (Text, Text), b : (Text, Text)) : Bool {
+    //             if (b.1 == "" or a.1 == "") {
+    //                 Text.toLowercase(a.0) == Text.toLowercase(b.0);
+    //             } else {
+    //                 (Text.toLowercase(a.0) == Text.toLowercase(b.0)) and (Text.toLowercase(a.1) == Text.toLowercase(b.1));
+    //             };
+    //         };
+
+    //         func is_fallback_response(http_response : Assets.HttpResponse) : Bool {
+    //             http_response.status_code == 200 and http_response.body == "fallback test" and exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("content-type", "text/plain")) and exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("IC-Certificate", "")) and exists_in<(Text, Text)>(http_response.headers, tuple_equal, ("IC-CertificateExpression", ""));
+    //         };
+
+    //         ts_assert_or_print(
+    //             is_fallback_response(http_response),
+    //             "[0xvc] \'/test/fallback/non-existent.html\' should return fallback response",
+    //         );
+
+    //         http_request := {
+    //             http_request with url = "test/fallback/unknown/path/non-existent.txt"
+    //         };
+    //         http_response := switch (assets.http_request(http_request)) {
+    //             case (#ok(response)) response;
+    //             case (#err(msg)) {
+    //                 ts_assert(false);
+    //                 return ts_print("Error making http request: " # msg);
+    //             };
+    //         };
+    //         ts_assert_or_print(
+    //             is_fallback_response(http_response),
+    //             "[0xvd] \'/test/fallback/unknown/path/non-existent.txt\' should return fallback response",
+    //         );
+
+    //         http_request := { http_request with url = "/non-existent.png" };
+    //         http_response := switch (assets.http_request(http_request)) {
+    //             case (#ok(response)) response;
+    //             case (#err(msg)) {
+    //                 ts_assert(false);
+    //                 return ts_print("Error making http request: " # msg);
+    //             };
+    //         };
+    //         ts_assert_or_print(
+    //             is_fallback_response(http_response),
+    //             "[0xve] \'/non-existent.png\' should return fallback response",
+    //         );
+
+    //     },
+    // );
+
+};

@@ -1,45 +1,45 @@
-import Array "mo:base/Array";
-import Text "mo:base/Text";
-import Debug "mo:base/Debug";
+import Array "mo:base@0/Array";
+import Text "mo:base@0/Text";
+import Debug "mo:base@0/Debug";
 
-import HttpParser "mo:http-parser";
+import HttpParser "mo:http-parser@0";
 
 import Assets "../src";
-import Itertools "mo:itertools/Iter";
+import Itertools "mo:itertools@0/Iter";
 
 module {
-    public func homepage(files : [Assets.AssetDetails]) : Text {
-        let files_list = Array.map(
-            files,
-            func(file : Assets.AssetDetails) : Text {
-                // Debug.print("file: " # debug_show (file));
+  public func homepage(files : [Assets.AssetDetails]) : Text {
+    let files_list = Array.map(
+      files,
+      func(file : Assets.AssetDetails) : Text {
+        // Debug.print("file: " # debug_show (file));
 
-                var html = "<li style=\"display:\"flex\"; flex-direction:\"row\" align-items: \"space-between\"; width=\"1vw\" \">
+        var html = "<li style=\"display:\"flex\"; flex-direction:\"row\" align-items: \"space-between\"; width=\"1vw\" \">
 
                     <b class=\"file_key\" data-file-key=\"" # HttpParser.encodeURI(file.key) # "\">" # file.key # "</b>
                     <span> - [" # file.content_type # "]      </span>";
 
-                for ((i, encoding) in Itertools.enumerate(file.encodings.vals())) {
+        for ((i, encoding) in Itertools.enumerate(file.encodings.vals())) {
 
-                    html #= "<div class=\"content_encoding\">
+          html #= "<div class=\"content_encoding\">
                     <span> - [ <a href = \" " # HttpParser.encodeURI(file.key) # "?content_encoding=" # encoding.content_encoding # " \">" # encoding.content_encoding # "</a>]   </span>
                     <span> -  " # debug_show (encoding.length) # " Bytes      </span>
                     " # (
-                        if (file.key == "/homepage" or file.key == "/fallback/index.html") {
-                            "<button class=\"delete-button\" disabled>Delete</button>";
-                        } else {
-                            "<button class=\"delete-button\">Delete</button>";
-                        }
-                    ) # "</div>";
+            if (file.key == "/homepage" or file.key == "/fallback/index.html") {
+              "<button class=\"delete-button\" disabled>Delete</button>";
+            } else {
+              "<button class=\"delete-button\">Delete</button>";
+            }
+          ) # "</div>";
 
-                };
+        };
 
-                html # "</li>";
+        html # "</li>";
 
-            },
-        );
+      },
+    );
 
-        "
+    "
             <!DOCTYPE html>
             <html lang=\"en\">
             <head>
@@ -238,5 +238,5 @@ module {
             </body>
             </html>
         ";
-    };
+  };
 };
